@@ -1,0 +1,23 @@
+{
+  "name": "ipl-2026-auction",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "import-players": "node scripts/import-players.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "next": "^14.2.35",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.20",
+    "pdf-parse": "1.1.1",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.13"
+  }
+}

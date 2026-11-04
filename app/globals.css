@@ -1,0 +1,7 @@
+@tailwind base; @tailwind components; @tailwind utilities;
+body { background: radial-gradient(ellipse at top, #12234a 0%, #070b16 60%); color: #e7ecf7; min-height: 100vh; }
+.card { @apply rounded-2xl border border-white/10 bg-white/5 p-4; }
+.btn { @apply rounded-xl px-4 py-2 font-semibold transition disabled:opacity-40; }
+.inp { @apply w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 outline-none focus:border-amber-400; }
+@keyframes pop { 0% { transform: scale(.6); opacity: 0 } 60% { transform: scale(1.1) } 100% { transform: scale(1); opacity: 1 } }
+.pop { animation: pop .5s ease-out; }
