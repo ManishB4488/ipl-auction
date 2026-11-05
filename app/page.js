@@ -7,7 +7,7 @@ import { Logo } from './components';
 
 function Form({ mode }) {
   const r = useRouter();
-  const [f, setF] = useState({ code: '', room: '', owner: '', team: '', sets: 99 });
+  const [f, setF] = useState({ code: '', room: '', owner: '', team: '', sets: 99, retained: true });
   const [taken, setTaken] = useState([]);
   const [err, setErr] = useState(''); const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
@@ -21,7 +21,7 @@ function Form({ mode }) {
       await ensureUser();
       const color = teamInfo(f.team).color;
       if (mode === 'create') {
-        const { data, error } = await sb.rpc('create_room', { p_name: f.room, p_owner: f.owner, p_team: f.team, p_color: color, p_max_set: +f.sets });
+        const { data, error } = await sb.rpc('create_room', { p_name: f.room, p_owner: f.owner, p_team: f.team, p_color: color, p_max_set: +f.sets, p_retained: f.retained });
         if (error) throw error; r.push(`/room/${data}`);
       } else {
         const { error } = await sb.rpc('join_room', { p_code: f.code, p_owner: f.owner, p_team: f.team, p_color: color });
@@ -40,8 +40,9 @@ function Form({ mode }) {
         <option value="">Choose your IPL franchise</option>
         {IPL_TEAMS.map((t) => <option key={t.name} value={t.name} disabled={taken.includes(t.name)}>{t.name}{taken.includes(t.name) ? ' (taken)' : ''}</option>)}
       </select></div>
-    {mode === 'create' && <label className="block text-sm">Player pool: use first N auction sets (42 = all players)
-      <input type="number" min="1" max="42" className="inp mt-1" value={f.sets} onChange={set('sets')} /></label>}
+    {mode === 'create' && <label className="block text-sm">Player pool: use first N auction sets (46 = all players)
+      <input type="number" min="1" max="46" className="inp mt-1" value={f.sets} onChange={set('sets')} /></label>}
+    {mode === 'create' && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.retained} onChange={(e) => setF({ ...f, retained: e.target.checked })} /> Include retained stars (Kohli, Gill, Rohit… auctioned first)</label>}
     {err && <p className="text-red-400 text-sm">{err}</p>}
     <button disabled={busy} className="btn w-full bg-amber-400 text-black">{mode === 'create' ? 'Create room' : 'Join room'}</button>
   </form>);
