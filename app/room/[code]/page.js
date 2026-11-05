@@ -36,10 +36,16 @@ function Upcoming({ rps, P, cur }) {
 }
 const TABS = ['Live', 'Results Table', 'My Franchise', 'All Teams', 'Final'];
 
+function PinBadge({ pin }) {
+  const [show, setShow] = useState(false);
+  return <button onClick={() => setShow(!show)} className="btn bg-white/10 text-sm" title="Your private recovery PIN">🔑 {show ? pin : 'Recovery PIN'}</button>;
+}
+
 export default function Room({ params }) {
   const code = params.code.toUpperCase();
   const [me, setMe] = useState(null), [info, setInfo] = useState(null), [room, setRoom] = useState(null);
   const [fr, setFr] = useState([]), [rps, setRps] = useState([]), [bids, setBids] = useState([]), [P, setP] = useState({});
+  const [pin, setPin] = useState(null);
   const [tab, setTab] = useState('Live'), [msg, setMsg] = useState(''), [now, setNow] = useState(Date.now()), [err, setErr] = useState('');
 
   const load = useCallback(async (id) => {
@@ -74,6 +80,11 @@ export default function Room({ params }) {
     return () => { dead = true; clearInterval(t); clearInterval(iv); ch && sb.removeChannel(ch); };
   }, [code, load]);
 
+  useEffect(() => {
+    if (!room?.id || !fr.some((f) => f.user_id === me?.id)) { setPin(null); return; }
+    sb.rpc('get_my_pin', { p_room: room.id }).then(({ data }) => setPin(data || null));
+  }, [room?.id, me?.id, fr.length]);
+
   const FR = useMemo(() => Object.fromEntries(fr.map((f) => [f.id, f])), [fr]);
   const mine = fr.find((f) => f.user_id === me?.id);
   const isHost = room && me && room.host_id === me.id;
@@ -98,17 +109,19 @@ export default function Room({ params }) {
 
   if (err) return <p className="text-red-400">{err}</p>;
   if (!info || !me) return <p>Loading…</p>;
-  if (!room) return <p className="card">This room is private to participants (spectators disabled) or you are not a member. <a className="underline text-amber-400" href="/">Join from the home page</a> with code <b>{code}</b>.</p>;
+  if (!room) return <p className="card">This room is private to participants (spectators disabled) or you are not a member. <a className="underline text-amber-400" href="/">Join from the home page</a> with code <b>{code}</b>, or <a className="underline text-amber-400" href={`/rejoin?code=${code}`}>rejoin with your PIN</a>.</p>;
 
   const link = typeof window !== 'undefined' ? window.location.href : '';
-  if (room.status === 'lobby') return <Lobby {...{ room, fr, isHost, mine, act, link, msg, setMsg }} />;
+  if (room.status === 'lobby') return <Lobby {...{ room, fr, isHost, mine, act, link, msg, setMsg, pin }} />;
 
   return (<div className="space-y-4">
     <div className="flex flex-wrap items-center gap-2">
       <h1 className="text-xl font-bold mr-auto">{room.name} <span className="text-sm text-slate-400">#{room.code} · {room.status.toUpperCase()}</span></h1>
+      {mine && pin && <PinBadge pin={pin} />}
       {TABS.map((t) => <button key={t} onClick={() => setTab(t)} className={`btn text-sm ${tab === t ? 'bg-amber-400 text-black' : 'bg-white/10'}`}>{t}</button>)}
     </div>
     {msg && <p className="rounded-lg bg-red-500/20 p-2 text-sm">{msg}</p>}
+    {!mine && <p className="rounded-lg bg-white/10 p-2 text-sm">You are watching as a spectator. Are you a player? <a className="text-amber-400 underline" href={`/rejoin?code=${code}`}>Rejoin with your PIN</a></p>}
     {tab === 'Live' && <Live {...{ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act }} />}
     {tab === 'Results Table' && <Table {...{ rps, P, FR, fr, isHost, act, room }} />}
     {tab === 'My Franchise' && (mine ? <Squad f={mine} room={room} rps={rps} P={P} /> : <p className="card">You are watching as a spectator.</p>)}
@@ -117,7 +130,7 @@ export default function Room({ params }) {
   </div>);
 }
 
-function Lobby({ room, fr, isHost, act, link, msg, mine }) {
+function Lobby({ room, fr, isHost, act, link, msg, mine, pin }) {
   const [r, setR] = useState({ p_purse: room.purse_lakh / 100, p_min: room.min_squad, p_max: room.max_squad, p_os: room.max_overseas, p_timer: room.timer_secs, p_spec: room.spectators, p_bots: room.fill_bots });
   const n = (k) => (e) => setR({ ...r, [k]: +e.target.value });
   return (<div className="grid gap-4 md:grid-cols-2">
@@ -127,6 +140,7 @@ function Lobby({ room, fr, isHost, act, link, msg, mine }) {
       <button className="btn bg-white/10" onClick={() => navigator.clipboard?.writeText(link)}>Copy invite link</button>
       <h3 className="font-semibold pt-2">Franchises ({fr.length}/10)</h3>
       {fr.map((f) => <div key={f.id} className="flex items-center gap-2"><Logo team={f.team} size={28} />{f.team} <span className="text-slate-400 text-sm">— {f.owner}{f.user_id === room.host_id && ' (host)'}{f.is_bot && ' 🤖'}</span></div>)}
+      {pin && <div className="rounded-lg border border-amber-400/40 bg-amber-400/10 p-3 text-sm">🔑 Your recovery PIN: <b className="tracking-widest">{pin}</b><br />Save it. If you change phone or lose access, use “Rejoin with PIN” on the home page.</div>}
       {!isHost && <p className="text-sm text-slate-400">Waiting for the host to start…</p>}</div>
     {isHost && <div className="card space-y-2"><h3 className="font-semibold">Custom rules (not official IPL rules)</h3>
       {[['Purse (₹ Cr)', 'p_purse'], ['Min squad', 'p_min'], ['Max squad', 'p_max'], ['Max overseas', 'p_os'], ['Timer (sec)', 'p_timer']].map(([l, k]) =>
