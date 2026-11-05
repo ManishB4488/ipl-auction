@@ -50,3 +50,9 @@ Spectators open the room link without joining (host can disable this in the lobb
   The "Wicketkeeper" role covers keepers (the PDF does not separate keeper-batters). `caps_raw` holds the raw caps numbers
   from the PDF unparsed because the PDF leaves empty columns blank, so test/ODI/T20 split is not reliable.
 - Players are not pre-assigned to real franchises. No official photos are bundled (licensing).
+
+## Auction order (run `supabase/update_auction_order.sql` once)
+Default order is **Capped first, then Uncapped**: 15 Indian batters, 10 overseas batters, 15 all-rounders, 10 wicketkeepers, 10 Indian bowlers,
+10 overseas bowlers (all capped), then every uncapped player as batters → all-rounders → wicketkeepers → bowlers. Capped players beyond those
+block sizes are auctioned at the end of the capped phase, before any uncapped player. Block sizes are the `p_quota` argument of `create_room`.
+Keep "Include retained stars" ticked: without them there are only 4 Indian capped batters, so the 15-player block can't fill.

@@ -242,7 +242,7 @@ function Live({ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act }) {
           <Photo name={p.name} />
           <div className="flex-1"><h2 className="text-3xl font-extrabold">{p.name}</h2>
             <p className="text-slate-300"><span className="mr-2 rounded bg-amber-400 px-2 py-0.5 text-xs font-bold text-black">{p.role.toUpperCase()}</span>{p.country} · {p.capped} · {p.bat}{p.bowl ? ` · ${p.bowl}` : ''}</p>
-            <p className="text-xs text-slate-400">{setLabel(p.set_code)} · {p.retained ? `Retained by ${p.ipl_team_2025} · custom base ${cr(cur.base_lakh)} (not official)` : `IPL 2025: ${p.ipl_team_2025 || '—'} · Base ${cr(cur.base_lakh)} (official reserve price)`}</p></div>
+            <p className="text-xs text-slate-400">{cur.block_label || setLabel(p.set_code)} · {p.retained ? `Retained by ${p.ipl_team_2025} · custom base ${cr(cur.base_lakh)} (not official)` : `IPL 2025: ${p.ipl_team_2025 || '—'} · Base ${cr(cur.base_lakh)} (official reserve price)`}</p></div>
           <div className={`text-5xl font-black tabular-nums ${left < 5000 ? 'text-red-400' : 'text-amber-400'}`}>{Math.ceil(left / 1000)}s</div></div>
         <div className="mt-4 grid grid-cols-2 gap-3 text-center">
           <div className="rounded-xl bg-black/30 p-3"><div className="text-xs text-slate-400">CURRENT BID</div><div className="text-3xl font-bold">{room.cur_bidder ? cr(room.cur_bid) : 'No bids'}</div></div>
