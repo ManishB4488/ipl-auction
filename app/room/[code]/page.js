@@ -21,6 +21,19 @@ function Photo({ name, size = 96 }) {
   return src ? <img src={src} alt={name} referrerPolicy="no-referrer" style={box} className="shrink-0 rounded-2xl bg-white/10 object-cover object-top" />
     : <div style={box} className="grid shrink-0 place-items-center rounded-2xl bg-white/10 font-bold text-amber-300">{initials}</div>;
 }
+const ROLES = [['Batter', 'Batters'], ['Wicketkeeper', 'Wicketkeepers'], ['All-rounder', 'All-rounders'], ['Bowler', 'Bowlers']];
+function Upcoming({ rps, P, cur }) {
+  const [role, setRole] = useState(null);
+  const active = role || P[cur?.player_id]?.role || 'Batter';
+  const pend = rps.filter((x) => x.status === 'pending' || x.status === 'live');
+  const by = (r) => pend.filter((x) => P[x.player_id]?.role === r);
+  const total = (r) => rps.filter((x) => P[x.player_id]?.role === r).length;
+  const list = by(active).slice(0, 15);
+  return (<div className="card"><h3 className="mb-2 font-semibold">Coming up by category <span className="text-xs font-normal text-slate-400">(remaining/total)</span></h3>
+    <div className="mb-2 flex flex-wrap gap-1">{ROLES.map(([r, l]) => <button key={r} onClick={() => setRole(r)} className={`rounded-full px-2 py-1 text-xs ${active === r ? 'bg-amber-400 text-black' : 'bg-white/10'}`}>{l} {by(r).length}/{total(r)}</button>)}</div>
+    <ul className="max-h-56 divide-y divide-white/10 overflow-y-auto text-sm">{list.map((x) => { const p = P[x.player_id]; return <li key={x.id} className="flex justify-between py-1"><span>{p?.name} <span className="text-slate-400">{p?.country}</span></span><span>{cr(x.base_lakh)}</span></li>; })}
+      {by(active).length > 15 && <li className="py-1 text-slate-400">+{by(active).length - 15} more…</li>}</ul></div>);
+}
 const TABS = ['Live', 'Results Table', 'My Franchise', 'All Teams', 'Final'];
 
 export default function Room({ params }) {
@@ -141,7 +154,7 @@ function Live({ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act }) {
         <div className="flex flex-wrap items-center gap-4">
           <Photo name={p.name} />
           <div className="flex-1"><h2 className="text-3xl font-extrabold">{p.name}</h2>
-            <p className="text-slate-300">{p.role} · {p.country} · {p.capped} · {p.bat}{p.bowl ? ` · ${p.bowl}` : ''}</p>
+            <p className="text-slate-300"><span className="mr-2 rounded bg-amber-400 px-2 py-0.5 text-xs font-bold text-black">{p.role.toUpperCase()}</span>{p.country} · {p.capped} · {p.bat}{p.bowl ? ` · ${p.bowl}` : ''}</p>
             <p className="text-xs text-slate-400">{setLabel(p.set_code)} · {p.retained ? `Retained by ${p.ipl_team_2025} · custom base ${cr(cur.base_lakh)} (not official)` : `IPL 2025: ${p.ipl_team_2025 || '—'} · Base ${cr(cur.base_lakh)} (official reserve price)`}</p></div>
           <div className={`text-5xl font-black tabular-nums ${left < 5000 ? 'text-red-400' : 'text-amber-400'}`}>{Math.ceil(left / 1000)}s</div></div>
         <div className="mt-4 grid grid-cols-2 gap-3 text-center">
@@ -170,6 +183,7 @@ function Live({ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act }) {
     <div className="space-y-4"><div className="card"><h3 className="font-semibold">Progress</h3>
       <p className="text-sm">{done}/{total} auctioned · {sold} sold · {rps.filter((x) => x.status === 'unsold').length} unsold · {rps.filter((x) => x.status === 'pending').length} remaining</p>
       <div className="mt-2 h-2 rounded bg-white/10"><div className="h-2 rounded bg-amber-400" style={{ width: `${(done / Math.max(total, 1)) * 100}%` }} /></div></div>
+      <Upcoming rps={rps} P={P} cur={cur} />
       <div className="card space-y-2"><h3 className="font-semibold">Teams</h3>{fr.map((f) => <div key={f.id} className="flex items-center gap-2 text-sm">
         <Logo team={f.team} size={22} /><span className="flex-1 truncate">{f.team}{f.is_bot && ' 🤖'}</span>
         <span>{cr(room.purse_lakh - f.spent_lakh)}</span><span className="text-slate-400">{f.squad_count}p · {f.os_count}/{room.max_overseas}os</span></div>)}</div></div>
@@ -181,7 +195,7 @@ function Table({ rps, P, FR, fr, isHost, act, room }) {
   let rows = rps.map((r) => ({ r, p: P[r.player_id] })).filter(({ p }) => p);
   rows = rows.filter(({ r, p }) => (!q || p.name.toLowerCase().includes(q.toLowerCase())) && (!team || r.sold_to === team) && (!role || p.role === role) &&
     (!nat || (nat === 'India' ? !p.overseas : p.overseas)) && (!cat || p.capped === cat) && (!st || r.status === st));
-  const key = { seq: (a) => a.r.seq, price: (a) => -(a.r.sold_lakh || 0), team: (a) => FR[a.r.sold_to]?.team || 'zzz', name: (a) => a.p.name };
+  const key = { seq: (a) => a.r.seq, price: (a) => -(a.r.sold_lakh || 0), team: (a) => FR[a.r.sold_to]?.team || 'zzz', name: (a) => a.p.name, role: (a) => ROLES.findIndex((x) => x[0] === a.p.role) * 100000 + a.r.seq };
   rows.sort((a, b) => (key[sort](a) > key[sort](b) ? 1 : -1));
   const csv = () => {
     const h = ['Player', 'Role', 'Nationality', 'Category', 'Set', 'Base (L)', 'Sold (L)', 'Bought By', 'Status', 'Time'];
@@ -196,7 +210,7 @@ function Table({ rps, P, FR, fr, isHost, act, room }) {
     <S v={nat} set={setNat} ph="All nationalities" opts={[['India', 'Indian'], ['OS', 'Overseas']]} />
     <S v={cat} set={setCat} ph="Capped/Uncapped" opts={[['Capped', 'Capped'], ['Uncapped', 'Uncapped']]} />
     <S v={st} set={setSt} ph="All status" opts={[['sold', 'SOLD'], ['unsold', 'UNSOLD'], ['pending', 'PENDING']]} />
-    <S v={sort} set={setSort} ph="Auction order" opts={[['price', 'Sort: price'], ['team', 'Sort: team'], ['name', 'Sort: A–Z']]} />
+    <S v={sort} set={setSort} ph="Auction order" opts={[['role', 'Group by category'], ['price', 'Sort: price'], ['team', 'Sort: team'], ['name', 'Sort: A–Z']]} />
     <button className="btn bg-white/10" onClick={csv}>Export CSV (opens in Excel)</button></div>
     <p className="text-xs text-slate-400">{rows.length} players · base prices are the official IPL 2026 reserve prices</p>
     <div className="overflow-x-auto"><table className="w-full text-sm"><thead className="text-left text-slate-400"><tr>{['Player', 'Role', 'Nationality', 'Cat.', 'Set', 'Base', 'Sold', 'Bought by', 'Status'].map((h) => <th key={h} className="p-2">{h}</th>)}</tr></thead>
@@ -216,7 +230,9 @@ function Squad({ f, room, rps, P }) {
       <div className="rounded bg-black/30 p-2">Spent<br /><b>{cr(f.spent_lakh)}</b></div><div className="rounded bg-black/30 p-2">Avg<br /><b>{sq.length ? cr(Math.round(f.spent_lakh / sq.length)) : '—'}</b></div></div>
     <p className="text-sm text-slate-300">{f.squad_count}/{room.max_squad} players (min {room.min_squad}) · 🇮🇳 {f.squad_count - f.os_count} · ✈ {f.os_count}/{room.max_overseas} · Slots left {room.max_squad - f.squad_count}</p>
     <p className="text-sm text-slate-300">BAT {cnt('Batter')} · BOWL {cnt('Bowler')} · AR {cnt('All-rounder')} · WK {cnt('Wicketkeeper')}{top && ` · Top buy: ${top.p.name} (${cr(top.sold_lakh)})`}</p>
-    <ul className="text-sm divide-y divide-white/10">{sq.map((x) => <li key={x.id} className="flex justify-between py-1"><span>{x.p?.name} <span className="text-slate-400">{x.p?.role} · {x.p?.country}</span></span><b>{cr(x.sold_lakh)}</b></li>)}</ul></div>);
+    {ROLES.map(([role, label]) => { const g = sq.filter((x) => x.p?.role === role); return g.length ? <div key={role}>
+      <div className="mt-2 flex justify-between border-b border-white/20 pb-1 text-xs font-semibold uppercase tracking-wide text-amber-300"><span>{label}</span><span>{g.length}</span></div>
+      <ul className="divide-y divide-white/10 text-sm">{g.map((x) => <li key={x.id} className="flex justify-between py-1"><span>{x.p?.name} <span className="text-slate-400">{x.p?.country}</span></span><b>{cr(x.sold_lakh)}</b></li>)}</ul></div> : null; })}</div>);
 }
 
 function Final({ rps, P, FR, fr, room }) {
