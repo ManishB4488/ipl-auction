@@ -5,3 +5,7 @@ body { background: radial-gradient(ellipse at top, #12234a 0%, #070b16 60%); col
 .inp { @apply w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 outline-none focus:border-amber-400; }
 @keyframes pop { 0% { transform: scale(.6); opacity: 0 } 60% { transform: scale(1.1) } 100% { transform: scale(1); opacity: 1 } }
 .pop { animation: pop .5s ease-out; }
+@keyframes fall { from { transform: translateY(-10vh) rotate(0); opacity: 1 } to { transform: translateY(110vh) rotate(720deg); opacity: .8 } }
+.confetti { position: fixed; top: 0; width: 10px; height: 14px; animation-name: fall; animation-timing-function: linear; animation-fill-mode: forwards; }
+@keyframes hammer { 0% { transform: rotate(-50deg) } 35% { transform: rotate(30deg) } 55% { transform: rotate(-8deg) } 100% { transform: rotate(0) } }
+.hammer { display: inline-block; animation: hammer .7s ease-out; }
