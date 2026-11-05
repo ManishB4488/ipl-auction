@@ -86,7 +86,7 @@ export default function Room({ params }) {
   // Drives the AI bots: the server decides whether a bot acts, so extra calls are harmless.
   useEffect(() => {
     if (!room || room.status !== 'live' || !room.fill_bots) return;
-    const iv = setInterval(() => sb.rpc('bot_step', { p_room: room.id }), isHost ? 1500 : 4000);
+    const iv = setInterval(() => sb.rpc('bot_step', { p_room: room.id }).then(({ error }) => { if (error) setMsg('Bot error: ' + error.message); }), isHost ? 1500 : 4000);
     return () => clearInterval(iv);
   }, [room?.id, room?.status, room?.fill_bots, isHost]);
 
