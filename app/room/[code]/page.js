@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { sb, ensureUser, cr, setLabel } from '../../../lib/supabase';
+import { Logo } from '../../components';
 
 const inc = (c) => (c < 100 ? 5 : c < 200 ? 10 : c < 500 ? 20 : 25);
 const photoCache = {};
@@ -69,6 +70,13 @@ export default function Room({ params }) {
   // any client may call tick(); the server only settles when the timer has really expired
   useEffect(() => { if (room?.status === 'live' && room.ends_at && left <= 0) { const t = setTimeout(() => sb.rpc('tick', { p_room: room.id }).then(() => load(room.id)), 400); return () => clearTimeout(t); } }, [left, room, load]);
 
+  // Drives the AI bots: the server decides whether a bot acts, so extra calls are harmless.
+  useEffect(() => {
+    if (!room || room.status !== 'live' || !room.fill_bots) return;
+    const iv = setInterval(() => sb.rpc('bot_step', { p_room: room.id }), isHost ? 1500 : 4000);
+    return () => clearInterval(iv);
+  }, [room?.id, room?.status, room?.fill_bots, isHost]);
+
   const act = async (fn, args = {}) => {
     setMsg(''); const { data, error } = await sb.rpc(fn, { p_room: room.id, ...args });
     if (error) setMsg(error.message); else if (typeof data === 'string' && data !== 'ok') setMsg(data);
@@ -97,7 +105,7 @@ export default function Room({ params }) {
 }
 
 function Lobby({ room, fr, isHost, act, link, msg, mine }) {
-  const [r, setR] = useState({ p_purse: room.purse_lakh / 100, p_min: room.min_squad, p_max: room.max_squad, p_os: room.max_overseas, p_timer: room.timer_secs, p_spec: room.spectators });
+  const [r, setR] = useState({ p_purse: room.purse_lakh / 100, p_min: room.min_squad, p_max: room.max_squad, p_os: room.max_overseas, p_timer: room.timer_secs, p_spec: room.spectators, p_bots: room.fill_bots });
   const n = (k) => (e) => setR({ ...r, [k]: +e.target.value });
   return (<div className="grid gap-4 md:grid-cols-2">
     <div className="card space-y-3"><h1 className="text-2xl font-bold">{room.name}</h1>
@@ -105,11 +113,12 @@ function Lobby({ room, fr, isHost, act, link, msg, mine }) {
       <input readOnly className="inp text-sm" value={link} onFocus={(e) => e.target.select()} />
       <button className="btn bg-white/10" onClick={() => navigator.clipboard?.writeText(link)}>Copy invite link</button>
       <h3 className="font-semibold pt-2">Franchises ({fr.length}/10)</h3>
-      {fr.map((f) => <div key={f.id} className="flex items-center gap-2"><span className="h-4 w-4 rounded-full" style={{ background: f.color }} />{f.team} <span className="text-slate-400 text-sm">— {f.owner}{f.user_id === room.host_id && ' (host)'}</span></div>)}
+      {fr.map((f) => <div key={f.id} className="flex items-center gap-2"><Logo team={f.team} size={28} />{f.team} <span className="text-slate-400 text-sm">— {f.owner}{f.user_id === room.host_id && ' (host)'}{f.is_bot && ' 🤖'}</span></div>)}
       {!isHost && <p className="text-sm text-slate-400">Waiting for the host to start…</p>}</div>
     {isHost && <div className="card space-y-2"><h3 className="font-semibold">Custom rules (not official IPL rules)</h3>
       {[['Purse (₹ Cr)', 'p_purse'], ['Min squad', 'p_min'], ['Max squad', 'p_max'], ['Max overseas', 'p_os'], ['Timer (sec)', 'p_timer']].map(([l, k]) =>
         <label key={k} className="flex items-center gap-2 text-sm"><span className="w-32">{l}</span><input type="number" className="inp" value={r[k]} onChange={n(k)} /></label>)}
+      <label className="flex gap-2 text-sm"><input type="checkbox" checked={r.p_bots} onChange={(e) => setR({ ...r, p_bots: e.target.checked })} /> Fill empty seats with AI bot teams (up to 10 teams)</label>
       <label className="flex gap-2 text-sm"><input type="checkbox" checked={r.p_spec} onChange={(e) => setR({ ...r, p_spec: e.target.checked })} /> Allow spectators</label>
       <button className="btn bg-white/10" onClick={() => act('set_rules', { ...r, p_purse: Math.round(r.p_purse * 100) })}>Save rules</button>
       <button disabled={fr.length < 3} className="btn w-full bg-green-500 text-black" onClick={() => act('start_room')}>Start auction {fr.length < 3 && '(need 3+)'}</button>
@@ -137,7 +146,7 @@ function Live({ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act }) {
           <div className={`text-5xl font-black tabular-nums ${left < 5000 ? 'text-red-400' : 'text-amber-400'}`}>{Math.ceil(left / 1000)}s</div></div>
         <div className="mt-4 grid grid-cols-2 gap-3 text-center">
           <div className="rounded-xl bg-black/30 p-3"><div className="text-xs text-slate-400">CURRENT BID</div><div className="text-3xl font-bold">{room.cur_bidder ? cr(room.cur_bid) : 'No bids'}</div></div>
-          <div className="rounded-xl bg-black/30 p-3" style={{ borderBottom: `4px solid ${FR[room.cur_bidder]?.color || 'transparent'}` }}><div className="text-xs text-slate-400">HIGHEST BIDDER</div><div className="text-2xl font-bold">{FR[room.cur_bidder]?.team || '—'}</div></div></div>
+          <div className="rounded-xl bg-black/30 p-3" style={{ borderBottom: `4px solid ${FR[room.cur_bidder]?.color || 'transparent'}` }}><div className="text-xs text-slate-400">HIGHEST BIDDER</div><div className="flex items-center justify-center gap-2 text-xl font-bold">{room.cur_bidder && <Logo team={FR[room.cur_bidder]?.team} size={32} />}{FR[room.cur_bidder]?.team || '—'}</div></div></div>
         {mine && room.status === 'live' && <div className="mt-4 flex gap-3">
           <button disabled={room.cur_bidder === mine.id} onClick={() => act('bid', { p_amount: next })} className="btn flex-1 bg-amber-400 py-4 text-xl text-black">BID {cr(next)}</button>
           <button onClick={() => act('pass')} className="btn bg-white/10 py-4">PASS</button></div>}
@@ -162,7 +171,7 @@ function Live({ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act }) {
       <p className="text-sm">{done}/{total} auctioned · {sold} sold · {rps.filter((x) => x.status === 'unsold').length} unsold · {rps.filter((x) => x.status === 'pending').length} remaining</p>
       <div className="mt-2 h-2 rounded bg-white/10"><div className="h-2 rounded bg-amber-400" style={{ width: `${(done / Math.max(total, 1)) * 100}%` }} /></div></div>
       <div className="card space-y-2"><h3 className="font-semibold">Teams</h3>{fr.map((f) => <div key={f.id} className="flex items-center gap-2 text-sm">
-        <span className="h-3 w-3 rounded-full" style={{ background: f.color }} /><span className="flex-1 truncate">{f.team}</span>
+        <Logo team={f.team} size={22} /><span className="flex-1 truncate">{f.team}{f.is_bot && ' 🤖'}</span>
         <span>{cr(room.purse_lakh - f.spent_lakh)}</span><span className="text-slate-400">{f.squad_count}p · {f.os_count}/{room.max_overseas}os</span></div>)}</div></div>
   </div>);
 }
@@ -202,7 +211,7 @@ function Squad({ f, room, rps, P }) {
   const cnt = (role) => sq.filter((x) => x.p?.role === role).length;
   const top = sq.reduce((m, x) => (x.sold_lakh > (m?.sold_lakh || 0) ? x : m), null);
   return (<div className="card space-y-2" style={{ borderColor: f.color }}>
-    <h3 className="text-xl font-bold" style={{ color: f.color }}>{f.team} <span className="text-sm text-slate-400">— {f.owner}</span></h3>
+    <h3 className="flex items-center gap-2 text-xl font-bold" style={{ color: f.color }}><Logo team={f.team} size={32} />{f.team} <span className="text-sm text-slate-400">— {f.owner}</span></h3>
     <div className="grid grid-cols-3 gap-2 text-center text-sm"><div className="rounded bg-black/30 p-2">Purse<br /><b>{cr(room.purse_lakh - f.spent_lakh)}</b></div>
       <div className="rounded bg-black/30 p-2">Spent<br /><b>{cr(f.spent_lakh)}</b></div><div className="rounded bg-black/30 p-2">Avg<br /><b>{sq.length ? cr(Math.round(f.spent_lakh / sq.length)) : '—'}</b></div></div>
     <p className="text-sm text-slate-300">{f.squad_count}/{room.max_squad} players (min {room.min_squad}) · 🇮🇳 {f.squad_count - f.os_count} · ✈ {f.os_count}/{room.max_overseas} · Slots left {room.max_squad - f.squad_count}</p>
