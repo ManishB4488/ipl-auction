@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { sb, ensureUser, cr, setLabel } from '../../../lib/supabase';
 import { Logo } from '../../components';
 
@@ -35,6 +35,49 @@ function Upcoming({ rps, P, cur, isHost, act }) {
       {by(active).length > 15 && <li className="py-1 text-slate-400">+{by(active).length - 15} more…</li>}</ul></div>);
 }
 const TABS = ['Live', 'Results Table', 'My Franchise', 'All Teams', 'Final'];
+
+// ---------- sound effects (synthesised in the browser, no audio files) ----------
+let _ctx;
+function unlockAudio() { try { _ctx = _ctx || new (window.AudioContext || window.webkitAudioContext)(); if (_ctx.state === 'suspended') _ctx.resume(); } catch (e) {} return _ctx; }
+function tone(f, d, type = 'sine', v = 0.15, when = 0) {
+  const c = unlockAudio(); if (!c) return;
+  const o = c.createOscillator(), g = c.createGain(), t0 = c.currentTime + when;
+  o.type = type; o.frequency.value = f; g.gain.setValueAtTime(v, t0); g.gain.exponentialRampToValueAtTime(0.0001, t0 + d);
+  o.connect(g); g.connect(c.destination); o.start(t0); o.stop(t0 + d);
+}
+function thud(when = 0, v = 0.6) {
+  const c = unlockAudio(); if (!c) return;
+  const t0 = c.currentTime + when, len = Math.floor(c.sampleRate * 0.15), buf = c.createBuffer(1, len, c.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
+  const n = c.createBufferSource(), g = c.createGain(); n.buffer = buf;
+  g.gain.setValueAtTime(v, t0); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.15);
+  n.connect(g); g.connect(c.destination); n.start(t0); tone(120, 0.2, 'sine', v, when);
+}
+const sfx = {
+  beep: () => tone(880, 0.1, 'square', 0.06), beepHi: () => tone(1320, 0.25, 'square', 0.08), bid: () => tone(520, 0.06, 'triangle', 0.07),
+  sold: () => { thud(0); thud(0.22); tone(523, 0.18, 'triangle', 0.15, 0.5); tone(659, 0.18, 'triangle', 0.15, 0.65); tone(784, 0.4, 'triangle', 0.15, 0.8); },
+  unsold: () => { tone(300, 0.25, 'sawtooth', 0.08); tone(220, 0.45, 'sawtooth', 0.08, 0.22); },
+};
+
+function SoldOverlay({ m, P, FR, onClose }) {
+  const sold = m.status === 'sold', team = FR[m.sold_to], p = P[m.player_id];
+  const bits = useMemo(() => Array.from({ length: 36 }, (_, i) => ({ left: Math.random() * 100, delay: Math.random() * 1.2, dur: 2.2 + Math.random() * 2, color: [team?.color || '#fbbf24', '#fbbf24', '#ffffff'][i % 3] })), [m.id]);
+  return (<div onClick={onClose} className="fixed inset-0 z-50 grid place-items-center bg-black/85 p-4 text-center">
+    {sold && bits.map((b, i) => <span key={i} className="confetti" style={{ left: `${b.left}%`, animationDelay: `${b.delay}s`, animationDuration: `${b.dur}s`, background: b.color }} />)}
+    <div className="pop space-y-3">
+      {sold ? (<>
+        <div className="hammer text-6xl">🔨</div>
+        <div className="text-6xl font-black tracking-widest text-green-400 md:text-8xl">SOLD!</div>
+        <div className="flex justify-center"><Logo team={team?.team} size={150} /></div>
+        <div className="text-2xl font-bold md:text-4xl">{team?.team}</div>
+        <div className="text-5xl font-black text-amber-400 md:text-7xl">{cr(m.sold_lakh)}</div>
+        <div className="flex items-center justify-center gap-3 text-lg md:text-2xl"><Photo name={p?.name || '?'} size={64} /><span>{p?.name} <span className="text-slate-300">· {p?.role}</span></span></div>
+      </>) : (<>
+        <div className="text-6xl font-black tracking-widest text-red-400 md:text-8xl">UNSOLD</div>
+        <div className="flex items-center justify-center gap-3 text-xl md:text-3xl"><Photo name={p?.name || '?'} size={72} /><span>{p?.name}</span></div>
+        <div className="text-slate-300">No team bought this player</div></>)}
+      <div className="text-xs text-slate-500">tap to close</div></div></div>);
+}
 
 function PinBadge({ pin }) {
   const [show, setShow] = useState(false);
@@ -94,6 +137,33 @@ export default function Room({ params }) {
   // any client may call tick(); the server only settles when the timer has really expired
   useEffect(() => { if (room?.status === 'live' && room.ends_at && left <= 0) { const t = setTimeout(() => sb.rpc('tick', { p_room: room.id }).then(() => load(room.id)), 400); return () => clearTimeout(t); } }, [left, room, load]);
 
+  // ---- sound + SOLD moment ----
+  const [sound, setSound] = useState(true), [moment, setMoment] = useState(null);
+  const soundRef = useRef(true), seenSale = useRef(null), momentTimer = useRef(null);
+  useEffect(() => {
+    try { const off = localStorage.getItem('auction-sound') === 'off'; setSound(!off); soundRef.current = !off; } catch (e) {}
+    const unlock = () => unlockAudio();
+    window.addEventListener('pointerdown', unlock, { once: true });
+    return () => window.removeEventListener('pointerdown', unlock);
+  }, []);
+  const play = (n) => { if (soundRef.current) sfx[n](); };
+  const toggleSound = () => {
+    const v = !soundRef.current; soundRef.current = v; setSound(v);
+    try { localStorage.setItem('auction-sound', v ? 'on' : 'off'); } catch (e) {}
+    if (v) { unlockAudio(); sfx.unsold(); }
+  };
+  useEffect(() => {   // a sale / unsold just happened (history on first load is ignored)
+    if (!room) return;
+    const lastRes = [...rps].filter((x) => x.sold_at).sort((a, b) => new Date(b.sold_at) - new Date(a.sold_at))[0];
+    const t = lastRes ? new Date(lastRes.sold_at).getTime() : 0;
+    if (seenSale.current === null) { seenSale.current = t; return; }
+    if (t > seenSale.current) {
+      seenSale.current = t; setMoment(lastRes); play(lastRes.status === 'sold' ? 'sold' : 'unsold');
+      if (momentTimer.current) clearTimeout(momentTimer.current);
+      momentTimer.current = setTimeout(() => setMoment(null), 4500);
+    }
+  }, [rps, room]);
+
   // Drives the AI bots: the server decides whether a bot acts, so extra calls are harmless.
   useEffect(() => {
     if (!room || room.status !== 'live' || !room.fill_bots) return;
@@ -115,8 +185,10 @@ export default function Room({ params }) {
   if (room.status === 'lobby') return <Lobby {...{ room, fr, isHost, mine, act, link, msg, setMsg, pin }} />;
 
   return (<div className="space-y-4">
+    {moment && <SoldOverlay m={moment} P={P} FR={FR} onClose={() => setMoment(null)} />}
     <div className="flex flex-wrap items-center gap-2">
       <h1 className="text-xl font-bold mr-auto">{room.name} <span className="text-sm text-slate-400">#{room.code} · {room.status.toUpperCase()}</span></h1>
+      <button onClick={toggleSound} className="btn bg-white/10 text-sm">{sound ? '🔊 Sound ON' : '🔇 Sound OFF'}</button>
       {room.status !== 'lobby' && <span className="rounded-full bg-white/10 px-2 py-1 text-xs">🤖 Bots {room.fill_bots ? 'ON' : 'OFF'}</span>}
       {mine && pin && <PinBadge pin={pin} />}
       {TABS.map((t) => <button key={t} onClick={() => setTab(t)} className={`btn text-sm ${tab === t ? 'bg-amber-400 text-black' : 'bg-white/10'}`}>{t}</button>)}
