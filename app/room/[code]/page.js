@@ -45,6 +45,50 @@ function PlayerInfo({ p, rp, room }) {
   </div>);
 }
 
+const TARGETS = { Batter: 5, Wicketkeeper: 2, 'All-rounder': 4, Bowler: 6 };   // suggested balanced minimum (17 of the 18 minimum squad)
+function Needs({ room, mine, rps, P, cur }) {
+  const sq = rps.filter((r) => r.sold_to === mine.id);
+  const have = (role) => sq.filter((r) => P[r.player_id]?.role === role).length;
+  const left = room.purse_lakh - mine.spent_lakh;
+  const toMin = Math.max(room.min_squad - mine.squad_count, 0);
+  const maxBid = Math.max(left - Math.max(room.min_squad - mine.squad_count - 1, 0) * 30, 0);
+  const curP = cur ? P[cur.player_id] : null;
+  const osLeft = Math.max(room.max_overseas - mine.os_count, 0);
+  let hint = null;
+  if (curP) hint = (curP.overseas && osLeft === 0) ? ['⚠ You have no overseas slot left for this player', 'bg-red-500/20'] : Math.max(TARGETS[curP.role] - have(curP.role), 0) > 0 ? ['🎯 This player fills a need in your squad', 'bg-green-600/25'] : ['This role is already covered in your squad', 'bg-white/10'];
+  return (<div className="card space-y-2"><h3 className="font-semibold">What my team needs</h3>
+    <div className="grid grid-cols-2 gap-2 text-center text-xs">{ROLES.map(([role, label]) => { const need = Math.max(TARGETS[role] - have(role), 0); return <div key={role} className={`rounded-lg p-2 ${need ? 'bg-amber-400/15' : 'bg-green-600/20'} ${curP && curP.role === role ? 'ring-1 ring-amber-300' : ''}`}>
+      <div className="text-slate-300">{label}</div><div className="text-base font-bold">{have(role)}/{TARGETS[role]}</div><div>{need ? `need ${need} more` : '✅ covered'}</div></div>; })}</div>
+    <p className="text-xs text-slate-400">Suggested balance only — you can build any squad you like.</p>
+    <p className="text-xs text-slate-300">✈ Overseas slots left: <b>{osLeft}</b> of {room.max_overseas} · Squad <b>{mine.squad_count}</b> (min {room.min_squad}, max {room.max_squad})</p>
+    <p className="text-xs text-slate-300">💰 Purse <b>{cr(left)}</b> · {toMin} more player{toMin === 1 ? '' : 's'} needed for the minimum squad<br />Safe average per remaining slot: <b>{toMin ? cr(Math.round(left / toMin)) : '—'}</b><br />Most you can bid on one player now: <b>{cr(maxBid)}</b> <span className="text-slate-500">(keeps ₹30 L per slot for the minimum squad)</span></p>
+    {hint && <p className={`rounded p-1 text-center text-xs ${hint[1]}`}>{hint[0]}</p>}</div>);
+}
+
+function Watchlist({ watch, rps, P, autos, act }) {
+  const items = watch.map((w) => ({ w, p: P[w.player_id], rp: rps.find((r) => r.player_id === w.player_id) })).filter((x) => x.p && x.rp).sort((a, b) => a.rp.seq - b.rp.seq);
+  const status = (rp) => rp.status === 'live' ? ['ON NOW', 'text-yellow-300'] : rp.status === 'pending' ? (() => { const n = rps.filter((x) => x.status === 'pending' && x.seq < rp.seq).length; return [n === 0 ? 'NEXT UP' : `${n} players before`, 'text-amber-300']; })() : rp.status === 'sold' ? ['SOLD', 'text-green-400'] : ['UNSOLD', 'text-red-400'];
+  const setAuto = (rp) => { const a = autos.find((x) => x.rp_id === rp.id); const v = prompt('Auto-bid up to how many ₹ Crore? (0 or empty = cancel)', a ? a.max_lakh / 100 : ''); if (v === null) return; const l = Math.round(parseFloat(v) * 100); act('set_auto_bid', { p_rp: rp.id, p_max: l > 0 ? l : 0 }); };
+  return (<div className="card"><h3 className="mb-1 font-semibold">⭐ My watchlist</h3>
+    {items.length === 0 ? <p className="text-xs text-slate-400">Tap ☆ next to a player to add them. They are highlighted when they come up.</p> :
+      <ul className="max-h-56 divide-y divide-white/10 overflow-y-auto text-sm">{items.map(({ w, p, rp }) => { const [st, col] = status(rp); const a = autos.find((x) => x.rp_id === rp.id); return <li key={w.player_id} className="flex items-center justify-between gap-2 py-1">
+        <span className="min-w-0 flex-1 truncate">{p.name} <span className={`text-xs ${col}`}>{st}</span></span>
+        {(rp.status === 'pending' || rp.status === 'live') && <button onClick={() => setAuto(rp)} className="rounded bg-white/10 px-2 py-0.5 text-xs">{a ? `🤖 ≤ ${cr(a.max_lakh)}` : '🤖 Auto'}</button>}
+        <button onClick={() => act('toggle_watch', { p_player: w.player_id })} className="text-xs text-slate-400" title="Remove">✕</button></li>; })}</ul>}</div>);
+}
+
+function AutoBid({ rp, autos, act }) {
+  const a = autos.find((x) => x.rp_id === rp.id);
+  const [v, setV] = useState('');
+  return (<div className="mt-3 rounded-xl bg-black/20 p-3 text-sm">
+    {a ? <div className="flex flex-wrap items-center gap-2"><span>🤖 Auto-bid is on, up to <b>{cr(a.max_lakh)}</b></span><button className="btn bg-white/10 py-1 text-xs" onClick={() => act('set_auto_bid', { p_rp: rp.id, p_max: 0 })}>Cancel</button></div>
+      : <div className="flex flex-wrap items-center gap-2"><span>Auto-bid up to ₹</span>
+        <input type="number" step="0.05" min="0" className="inp w-24" value={v} onChange={(e) => setV(e.target.value)} placeholder="Cr" /><span>Cr</span>
+        <button className="btn bg-amber-400 py-1 text-black" onClick={() => { const l = Math.round(parseFloat(v) * 100); if (l > 0) { act('set_auto_bid', { p_rp: rp.id, p_max: l }); setV(''); } }}>Set</button>
+        <span className="text-xs text-slate-400">The app bids for you, one step at a time, up to your limit. Private.</span></div>}
+  </div>);
+}
+
 function AccelPick({ room, fr, rps, P, mine, isHost, act }) {
   const unsold = rps.filter((r) => r.status === 'unsold');
   const [sel, setSel] = useState([]);
@@ -71,7 +115,7 @@ function AccelPick({ room, fr, rps, P, mine, isHost, act }) {
   </div>);
 }
 const ROLES = [['Batter', 'Batters'], ['Wicketkeeper', 'Wicketkeepers'], ['All-rounder', 'All-rounders'], ['Bowler', 'Bowlers']];
-function Upcoming({ rps, P, cur, isHost, act }) {
+function Upcoming({ rps, P, cur, isHost, act, watchSet, mine }) {
   const [role, setRole] = useState(null);
   const active = role || P[cur?.player_id]?.role || 'Batter';
   const pend = rps.filter((x) => x.status === 'pending' || x.status === 'live');
@@ -80,7 +124,7 @@ function Upcoming({ rps, P, cur, isHost, act }) {
   const list = by(active).slice(0, 15);
   return (<div className="card"><h3 className="mb-2 font-semibold">Coming up by category <span className="text-xs font-normal text-slate-400">(remaining/total)</span></h3>
     <div className="mb-2 flex flex-wrap gap-1">{ROLES.map(([r, l]) => <button key={r} onClick={() => setRole(r)} className={`rounded-full px-2 py-1 text-xs ${active === r ? 'bg-amber-400 text-black' : 'bg-white/10'}`}>{l} {by(r).length}/{total(r)}</button>)}</div>
-    <ul className="max-h-56 divide-y divide-white/10 overflow-y-auto text-sm">{list.map((x) => { const p = P[x.player_id]; return <li key={x.id} className="flex justify-between py-1"><span>{p?.name} <span className="text-slate-400">{p?.country}</span></span><span className="flex items-center gap-2">{cr(x.base_lakh)}{isHost && x.status === 'pending' && <button title="Bots sit out this player" onClick={() => act('host_bots_skip', { p_rp: x.id, p_skip: !x.bots_skip })} className={`rounded px-1 text-xs ${x.bots_skip ? 'bg-red-500/70' : 'bg-white/10'}`}>{x.bots_skip ? '🚫🤖' : '🤖'}</button>}</span></li>; })}
+    <ul className="max-h-56 divide-y divide-white/10 overflow-y-auto text-sm">{list.map((x) => { const p = P[x.player_id]; return <li key={x.id} className={`flex justify-between py-1 ${watchSet && watchSet.has(x.player_id) ? 'bg-yellow-300/10' : ''}`}><span>{mine && <button title="Watchlist" onClick={() => act('toggle_watch', { p_player: x.player_id })} className="mr-1 text-yellow-300">{watchSet && watchSet.has(x.player_id) ? '★' : '☆'}</button>}{p?.name} <span className="text-slate-400">{p?.country}</span></span><span className="flex items-center gap-2">{cr(x.base_lakh)}{isHost && x.status === 'pending' && <button title="Bots sit out this player" onClick={() => act('host_bots_skip', { p_rp: x.id, p_skip: !x.bots_skip })} className={`rounded px-1 text-xs ${x.bots_skip ? 'bg-red-500/70' : 'bg-white/10'}`}>{x.bots_skip ? '🚫🤖' : '🤖'}</button>}</span></li>; })}
       {by(active).length > 15 && <li className="py-1 text-slate-400">+{by(active).length - 15} more…</li>}</ul></div>);
 }
 const TABS = ['Live', 'Results Table', 'My Franchise', 'All Teams', 'Final'];
@@ -136,17 +180,19 @@ function PinBadge({ pin }) {
 export default function Room({ params }) {
   const code = params.code.toUpperCase();
   const [me, setMe] = useState(null), [info, setInfo] = useState(null), [room, setRoom] = useState(null);
+  const [autos, setAutos] = useState([]), [watch, setWatch] = useState([]);
   const [fr, setFr] = useState([]), [rps, setRps] = useState([]), [bids, setBids] = useState([]), [P, setP] = useState({});
   const [pin, setPin] = useState(null);
   const [tab, setTab] = useState('Live'), [msg, setMsg] = useState(''), [now, setNow] = useState(Date.now()), [err, setErr] = useState('');
 
   const load = useCallback(async (id) => {
-    const [r, f, p, b] = await Promise.all([
+    const [r, f, p, b, au, wa] = await Promise.all([
       sb.from('rooms').select('*').eq('id', id).maybeSingle(),
       sb.from('franchises').select('*').eq('room_id', id).order('created_at'),
       sb.from('room_players').select('*').eq('room_id', id).order('seq').limit(1000),
-      sb.from('bids').select('*').eq('room_id', id).order('id', { ascending: false }).limit(300)]);
-    setRoom(r.data); setFr(f.data || []); setRps(p.data || []); setBids(b.data || []);
+      sb.from('bids').select('*').eq('room_id', id).order('id', { ascending: false }).limit(300),
+      sb.from('auto_bids').select('*').eq('room_id', id), sb.from('watchlist').select('*').eq('room_id', id)]);   // RLS: only your own rows
+    setRoom(r.data); setFr(f.data || []); setRps(p.data || []); setBids(b.data || []); setAutos(au.data || []); setWatch(wa.data || []);
   }, []);
 
   useEffect(() => {
@@ -244,7 +290,7 @@ export default function Room({ params }) {
     </div>
     {msg && <p className="rounded-lg bg-red-500/20 p-2 text-sm">{msg}</p>}
     {!mine && <p className="rounded-lg bg-white/10 p-2 text-sm">You are watching as a spectator. Are you a player? <a className="text-amber-400 underline" href={`/rejoin?code=${code}`}>Rejoin with your PIN</a></p>}
-    {tab === 'Live' && (room.status === 'accel_pick' ? <AccelPick {...{ room, fr, rps, P, mine, isHost, act }} /> : <Live {...{ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act }} />)}
+    {tab === 'Live' && (room.status === 'accel_pick' ? <AccelPick {...{ room, fr, rps, P, mine, isHost, act }} /> : <Live {...{ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act, autos, watch }} />)}
     {tab === 'Results Table' && <Table {...{ rps, P, FR, fr, isHost, act, room }} />}
     {tab === 'My Franchise' && (mine ? <Squad f={mine} room={room} rps={rps} P={P} /> : <p className="card">You are watching as a spectator.</p>)}
     {tab === 'All Teams' && <div className="grid gap-4 md:grid-cols-2">{fr.map((f) => <Squad key={f.id} f={f} room={room} rps={rps} P={P} />)}</div>}
@@ -274,7 +320,8 @@ function Lobby({ room, fr, isHost, act, link, msg, mine, pin }) {
       {msg && <p className="text-sm text-red-400">{msg}</p>}</div>}</div>);
 }
 
-function Live({ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act }) {
+function Live({ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act, autos, watch }) {
+  const watchSet = new Set(watch.map((w) => w.player_id));
   const p = cur && P[cur.player_id];
   const recent = [...rps].filter((x) => x.sold_at).sort((a, b) => new Date(b.sold_at) - new Date(a.sold_at)).slice(0, 6);
   const last = recent[0];
@@ -292,10 +339,11 @@ function Live({ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act }) {
     <div className="lg:col-span-2 space-y-4">
       {last && <div key={last.id} className="pop flex items-center justify-center gap-3 rounded-xl p-3 text-center font-bold" style={{ background: last.status === 'sold' ? '#16a34a55' : '#dc262655' }}><Photo name={P[last.player_id]?.name || '?'} size={56} />
         {last.status === 'sold' ? `🔨 SOLD! ${P[last.player_id]?.name} → ${FR[last.sold_to]?.team} for ${cr(last.sold_lakh)}` : `❌ UNSOLD: ${P[last.player_id]?.name}`}</div>}
-      {p ? <div className="card pop" key={cur.id}>
+      {p ? <div className={`card pop ${watchSet.has(p.id) ? 'ring-2 ring-yellow-300' : ''}`} key={cur.id}>
+        {watchSet.has(p.id) && <div className="mb-2 rounded-lg bg-yellow-300/20 p-1 text-center text-sm font-bold text-yellow-200">⭐ On your watchlist</div>}
         <div className="flex flex-wrap items-center gap-4">
           <Photo name={p.name} />
-          <div className="flex-1"><h2 className="text-3xl font-extrabold">{p.name}</h2>
+          <div className="flex-1"><h2 className="text-3xl font-extrabold">{p.name}{mine && <button title="Add to watchlist" onClick={() => act('toggle_watch', { p_player: p.id })} className="ml-2 text-3xl text-yellow-300">{watchSet.has(p.id) ? '★' : '☆'}</button>}</h2>
             <PlayerInfo p={p} rp={cur} room={room} /></div>
           <div className={`text-5xl font-black tabular-nums ${left < 5000 ? 'text-red-400' : 'text-amber-400'}`}>{Math.ceil(left / 1000)}s</div></div>
         {call && <div key={call} className="pop mt-3 rounded-xl bg-amber-400/15 p-2 text-center text-xl font-extrabold text-amber-300">🔨 {call}</div>}
@@ -305,6 +353,7 @@ function Live({ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act }) {
         {mine && room.status === 'live' && <div className="mt-4 flex gap-3">
           <button disabled={room.cur_bidder === mine.id} onClick={() => act('bid', { p_amount: next })} className="btn flex-1 bg-amber-400 py-4 text-xl text-black">BID {cr(next)}</button>
           <button onClick={() => act('pass')} className="btn bg-white/10 py-4">PASS</button></div>}
+        {mine && room.status === 'live' && <AutoBid rp={cur} autos={autos} act={act} />}
         <p className="mt-2 text-center text-xs text-slate-500">Bid steps: +5 L below ₹1 Cr · +10 L to ₹2 Cr · +20 L to ₹5 Cr · +25 L above</p>
         {room.status === 'paused' && <p className="mt-3 text-center text-amber-300">⏸ Auction paused by host</p>}
       </div> : <div className="card text-center text-xl">{room.status === 'review' ? 'First round finished — host can re-auction unsold players.' : room.status === 'done' ? 'Auction complete! See the Final tab.' : 'Waiting…'}</div>}
@@ -328,7 +377,9 @@ function Live({ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act }) {
     <div className="space-y-4"><div className="card"><h3 className="font-semibold">Progress</h3>
       <p className="text-sm">{done}/{total} auctioned · {sold} sold · {rps.filter((x) => x.status === 'unsold').length} unsold · {rps.filter((x) => x.status === 'pending').length} remaining</p>
       <div className="mt-2 h-2 rounded bg-white/10"><div className="h-2 rounded bg-amber-400" style={{ width: `${(done / Math.max(total, 1)) * 100}%` }} /></div></div>
-      <Upcoming rps={rps} P={P} cur={cur} isHost={isHost} act={act} />
+      {mine && <Needs room={room} mine={mine} rps={rps} P={P} cur={cur} />}
+      {mine && <Watchlist watch={watch} rps={rps} P={P} autos={autos} act={act} />}
+      <Upcoming rps={rps} P={P} cur={cur} isHost={isHost} act={act} watchSet={watchSet} mine={mine} />
       <div className="card space-y-2"><h3 className="font-semibold">Teams</h3>{fr.map((f) => <div key={f.id} className="flex items-center gap-2 text-sm">
         <Logo team={f.team} size={22} /><span className="flex-1 truncate">{f.team}{f.is_bot && ' 🤖'}</span>
         <span>{cr(room.purse_lakh - f.spent_lakh)}</span><span className="text-slate-400">{f.squad_count}p · {f.os_count}/{room.max_overseas}os</span></div>)}</div></div>
