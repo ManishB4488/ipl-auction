@@ -262,6 +262,17 @@ export default function Room({ params }) {
     }
   }, [rps, room]);
 
+  useEffect(() => {   // keep the phone screen awake while the auction runs (bots and timers need an open screen)
+    const on = room && (room.status === 'live' || room.status === 'paused' || room.status === 'accel_pick');
+    if (!on || !('wakeLock' in navigator)) return;
+    let lock = null, dead = false;
+    const get = () => navigator.wakeLock.request('screen').then((l) => { if (dead) l.release(); else lock = l; }).catch(() => {});
+    get();
+    const vis = () => { if (document.visibilityState === 'visible') get(); };
+    document.addEventListener('visibilitychange', vis);
+    return () => { dead = true; document.removeEventListener('visibilitychange', vis); if (lock) lock.release().catch(() => {}); };
+  }, [room?.status === 'live' || room?.status === 'paused' || room?.status === 'accel_pick']);
+
   // Drives the AI bots: the server decides whether a bot acts, so extra calls are harmless.
   useEffect(() => {
     if (!room || room.status !== 'live' || !room.fill_bots) return;

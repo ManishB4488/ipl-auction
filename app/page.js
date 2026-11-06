@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { sb, ensureUser } from '../lib/supabase';
 import { IPL_TEAMS, teamInfo } from '../lib/teams';
 import { Logo } from './components';
+import { InstallCard } from './install';
 
 function Form({ mode }) {
   const r = useRouter();
@@ -53,5 +54,6 @@ export default function Home() {
     <section className="text-center py-6"><h1 className="text-3xl md:text-5xl font-extrabold">Run your own IPL 2026 mega auction</h1>
       <p className="mt-3 text-slate-300">3–10 friends · pick an IPL franchise · ₹120 Cr purse · empty seats are filled by AI bot teams.</p></section>
     <div className="grid gap-4 md:grid-cols-2"><Form mode="create" /><Form mode="join" /></div>
+    <InstallCard />
     <p className="text-center text-sm text-slate-400">Spectators: just open the room link your host shares. · <a href="/rejoin" className="text-amber-400 underline">Lost access to your team? Rejoin with your PIN</a></p></div>);
 }
