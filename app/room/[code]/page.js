@@ -4,22 +4,71 @@ import { sb, ensureUser, cr, setLabel } from '../../../lib/supabase';
 import { Logo } from '../../components';
 
 const inc = (c) => (c < 100 ? 5 : c < 200 ? 10 : c < 500 ? 20 : 25);
-const photoCache = {};
-function Photo({ name, size = 96 }) {
-  const [src, setSrc] = useState(photoCache[name]);
+const wikiCache = {};
+function useWiki(name) {
+  const [v, setV] = useState(wikiCache[name]);
   useEffect(() => {
-    if (photoCache[name] !== undefined) { setSrc(photoCache[name]); return; }
+    if (wikiCache[name] !== undefined) { setV(wikiCache[name]); return; }
     let dead = false;
     fetch('https://en.wikipedia.org/api/rest_v1/page/summary/' + encodeURIComponent(name.replace(/ /g, '_')))
       .then((r) => (r.ok ? r.json() : null))
-      .then((j) => { const ok = j && /cricket/i.test(j.description || '') && j.thumbnail && j.thumbnail.source; photoCache[name] = ok ? j.thumbnail.source : null; if (!dead) setSrc(photoCache[name]); })
-      .catch(() => { photoCache[name] = null; });
+      .then((j) => { const ok = j && /cricket/i.test(j.description || ''); wikiCache[name] = ok ? { src: j.thumbnail && j.thumbnail.source, extract: j.extract } : {}; if (!dead) setV(wikiCache[name]); })
+      .catch(() => { wikiCache[name] = {}; });
     return () => { dead = true; };
   }, [name]);
+  return v || {};
+}
+function Photo({ name, size = 96 }) {
+  const { src } = useWiki(name);
   const initials = name.split(' ').map((w) => w[0]).slice(0, 2).join('');
   const box = { width: size, height: size };
   return src ? <img src={src} alt={name} referrerPolicy="no-referrer" style={box} className="shrink-0 rounded-2xl bg-white/10 object-cover object-top" />
     : <div style={box} className="grid shrink-0 place-items-center rounded-2xl bg-white/10 font-bold text-amber-300">{initials}</div>;
+}
+function PlayerInfo({ p, rp, room }) {
+  const info = useWiki(p.name);
+  const age = (() => { const m = (p.dob || '').split('/'); if (m.length !== 3) return null; return Math.floor((Date.now() - new Date(+m[2], +m[1] - 1, +m[0])) / 31557600000); })();
+  const chip = (t, c) => <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${c}`}>{t}</span>;
+  return (<div className="space-y-1.5">
+    <div className="flex flex-wrap gap-1.5">
+      {chip(p.role.toUpperCase(), 'bg-amber-400 text-black')}
+      {p.overseas ? chip('✈ OVERSEAS · ' + p.country, 'bg-sky-400 text-black') : chip('🇮🇳 INDIAN', 'bg-green-500 text-black')}
+      {p.capped === 'Capped' ? chip('CAPPED', 'bg-purple-500 text-white') : chip('UNCAPPED', 'bg-slate-500 text-white')}
+      {p.retained && chip('⭐ RETAINED STAR', 'bg-yellow-300 text-black')}
+      {room.accel_done && chip('⚡ ACCELERATED ROUND', 'bg-red-500 text-white')}
+    </div>
+    <p className="text-xs text-slate-300">{rp.blk_label || setLabel(p.set_code)}</p>
+    <p className="text-sm text-slate-300">{age != null && `Age ${age} · `}Bats {p.bat === 'RHB' ? 'right-handed' : p.bat === 'LHB' ? 'left-handed' : '—'}{p.bowl ? ` · Bowls ${p.bowl.toLowerCase()}` : ' · Does not bowl (per list)'}</p>
+    <p className="text-xs text-slate-400">{p.retained ? `Retained by ${p.ipl_team_2025} · custom base ${cr(rp.base_lakh)} (not official)` : `IPL 2025 team: ${p.ipl_team_2025 || 'none'}${p.ipl_matches != null ? ` (${p.ipl_matches} matches)` : ''} · Base ${cr(rp.base_lakh)} (official reserve price)`}</p>
+    {info.extract && <p className="text-xs text-slate-500">{info.extract.slice(0, 230)}{info.extract.length > 230 ? '…' : ''} <span className="italic">(Wikipedia)</span></p>}
+    <a href={`https://www.espncricinfo.com/search?q=${encodeURIComponent(p.name)}`} target="_blank" rel="noreferrer" className="text-xs text-amber-400 underline">Career stats on ESPNcricinfo ↗</a>
+  </div>);
+}
+
+function AccelPick({ room, fr, rps, P, mine, isHost, act }) {
+  const unsold = rps.filter((r) => r.status === 'unsold');
+  const [sel, setSel] = useState([]);
+  useEffect(() => {
+    if (!mine) return;
+    sb.from('accel_picks').select('rp_id').eq('franchise_id', mine.id).then(({ data }) => { if (data && data.length) setSel(data.map((x) => x.rp_id)); });
+  }, [mine?.id]);
+  const toggle = (id) => setSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : s.length >= 10 ? s : [...s, id]));
+  const ready = fr.filter((f) => f.accel_ready).length;
+  return (<div className="space-y-4">
+    <div className="card"><h2 className="text-xl font-bold">⚡ Accelerated auction — pick your players</h2>
+      <p className="mt-1 text-sm text-slate-300">The main round is over. Each franchise picks <b>5–10</b> unsold players it wants. Only picked players are auctioned again, with a <b>{room.accel_secs || 7}-second</b> timer. Your picks are private. Bots have already picked.</p>
+      <div className="mt-2 flex flex-wrap gap-2 text-xs">{fr.map((f) => <span key={f.id} className={`rounded-full px-2 py-1 ${f.accel_ready ? 'bg-green-600/40' : 'bg-white/10'}`}>{f.accel_ready ? '✅' : '⏳'} {f.team}{f.is_bot ? ' 🤖' : ''}</span>)}</div>
+      {isHost && <button className="btn mt-3 bg-green-500 text-black" onClick={() => act('host_start_accel')}>Start accelerated auction ({ready}/{fr.length} ready)</button>}</div>
+    {mine ? <div className="card space-y-3">
+      <div className="flex flex-wrap items-center gap-3"><b>{sel.length}/10 selected</b><span className="text-xs text-slate-400">(minimum 5)</span>
+        <button className="btn bg-amber-400 text-black" onClick={() => act('submit_picks', { p_rps: sel })}>{mine.accel_ready ? 'Update my picks' : 'Submit my picks'}</button>
+        {mine.accel_ready && <span className="text-sm text-green-400">✅ Submitted — you can change them until the host starts.</span>}</div>
+      {ROLES.map(([role, label]) => { const g = unsold.filter((r) => P[r.player_id]?.role === role); return g.length ? <div key={role}>
+        <div className="border-b border-white/20 pb-1 text-xs font-semibold uppercase tracking-wide text-amber-300">{label} ({g.length})</div>
+        <div className="grid gap-x-4 sm:grid-cols-2">{g.map((r) => { const p = P[r.player_id]; return <label key={r.id} className="flex cursor-pointer items-center gap-2 py-1 text-sm">
+          <input type="checkbox" checked={sel.includes(r.id)} onChange={() => toggle(r.id)} /><span className="flex-1">{p?.name} <span className="text-slate-400">{p?.overseas ? '✈ ' : ''}{p?.country}</span></span><span>{cr(r.base_lakh)}</span></label>; })}</div></div> : null; })}
+    </div> : <p className="card">Waiting for franchises to submit their picks…</p>}
+  </div>);
 }
 const ROLES = [['Batter', 'Batters'], ['Wicketkeeper', 'Wicketkeepers'], ['All-rounder', 'All-rounders'], ['Bowler', 'Bowlers']];
 function Upcoming({ rps, P, cur, isHost, act }) {
@@ -187,7 +236,7 @@ export default function Room({ params }) {
   return (<div className="space-y-4">
     {moment && <SoldOverlay m={moment} P={P} FR={FR} onClose={() => setMoment(null)} />}
     <div className="flex flex-wrap items-center gap-2">
-      <h1 className="text-xl font-bold mr-auto">{room.name} <span className="text-sm text-slate-400">#{room.code} · {room.status.toUpperCase()}</span></h1>
+      <h1 className="text-xl font-bold mr-auto">{room.name} <span className="text-sm text-slate-400">#{room.code} · {room.status.replace('_', ' ').toUpperCase()}</span></h1>
       <button onClick={toggleSound} className="btn bg-white/10 text-sm">{sound ? '🔊 Sound ON' : '🔇 Sound OFF'}</button>
       {room.status !== 'lobby' && <span className="rounded-full bg-white/10 px-2 py-1 text-xs">🤖 Bots {room.fill_bots ? 'ON' : 'OFF'}</span>}
       {mine && pin && <PinBadge pin={pin} />}
@@ -195,7 +244,7 @@ export default function Room({ params }) {
     </div>
     {msg && <p className="rounded-lg bg-red-500/20 p-2 text-sm">{msg}</p>}
     {!mine && <p className="rounded-lg bg-white/10 p-2 text-sm">You are watching as a spectator. Are you a player? <a className="text-amber-400 underline" href={`/rejoin?code=${code}`}>Rejoin with your PIN</a></p>}
-    {tab === 'Live' && <Live {...{ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act }} />}
+    {tab === 'Live' && (room.status === 'accel_pick' ? <AccelPick {...{ room, fr, rps, P, mine, isHost, act }} /> : <Live {...{ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act }} />)}
     {tab === 'Results Table' && <Table {...{ rps, P, FR, fr, isHost, act, room }} />}
     {tab === 'My Franchise' && (mine ? <Squad f={mine} room={room} rps={rps} P={P} /> : <p className="card">You are watching as a spectator.</p>)}
     {tab === 'All Teams' && <div className="grid gap-4 md:grid-cols-2">{fr.map((f) => <Squad key={f.id} f={f} room={room} rps={rps} P={P} />)}</div>}
@@ -230,6 +279,12 @@ function Live({ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act }) {
   const recent = [...rps].filter((x) => x.sold_at).sort((a, b) => new Date(b.sold_at) - new Date(a.sold_at)).slice(0, 6);
   const last = recent[0];
   const next = !cur ? 0 : room.cur_bidder ? room.cur_bid + inc(room.cur_bid) : cur.base_lakh;
+  const secs = Math.ceil(left / 1000), tot = room.timer_secs || 20;
+  let call = null;   // "going once / twice" call as the timer runs down
+  if (cur && room.status === 'live' && left > 0) {
+    const stage = secs <= 1 ? 3 : secs <= Math.min(3, Math.floor(tot * 0.3)) ? 2 : secs <= Math.min(5, Math.ceil(tot * 0.5)) ? 1 : 0;
+    if (stage) call = room.cur_bidder ? ['', 'Going once…', 'Going twice…', 'FINAL CALL…'][stage] : 'Any bids?';
+  }
   const done = rps.filter((x) => x.status === 'sold' || x.status === 'unsold').length;
   const total = rps.length, sold = rps.filter((x) => x.status === 'sold').length;
   const myBids = bids.filter((b) => cur && b.rp_id === cur.id);
@@ -241,15 +296,16 @@ function Live({ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act }) {
         <div className="flex flex-wrap items-center gap-4">
           <Photo name={p.name} />
           <div className="flex-1"><h2 className="text-3xl font-extrabold">{p.name}</h2>
-            <p className="text-slate-300"><span className="mr-2 rounded bg-amber-400 px-2 py-0.5 text-xs font-bold text-black">{p.role.toUpperCase()}</span>{p.country} · {p.capped} · {p.bat}{p.bowl ? ` · ${p.bowl}` : ''}</p>
-            <p className="text-xs text-slate-400">{cur.block_label || setLabel(p.set_code)} · {p.retained ? `Retained by ${p.ipl_team_2025} · custom base ${cr(cur.base_lakh)} (not official)` : `IPL 2025: ${p.ipl_team_2025 || '—'} · Base ${cr(cur.base_lakh)} (official reserve price)`}</p></div>
+            <PlayerInfo p={p} rp={cur} room={room} /></div>
           <div className={`text-5xl font-black tabular-nums ${left < 5000 ? 'text-red-400' : 'text-amber-400'}`}>{Math.ceil(left / 1000)}s</div></div>
+        {call && <div key={call} className="pop mt-3 rounded-xl bg-amber-400/15 p-2 text-center text-xl font-extrabold text-amber-300">🔨 {call}</div>}
         <div className="mt-4 grid grid-cols-2 gap-3 text-center">
-          <div className="rounded-xl bg-black/30 p-3"><div className="text-xs text-slate-400">CURRENT BID</div><div className="text-3xl font-bold">{room.cur_bidder ? cr(room.cur_bid) : 'No bids'}</div></div>
+          <div className="rounded-xl bg-black/30 p-3"><div className="text-xs text-slate-400">CURRENT BID</div><div className="text-3xl font-bold">{room.cur_bidder ? cr(room.cur_bid) : 'No bids'}</div><div className="mt-1 text-xs text-slate-400">{room.cur_bidder ? `Next bid ${cr(next)} (+${cr(inc(room.cur_bid))})` : `Opens at ${cr(next)} (base price)`}</div></div>
           <div className="rounded-xl bg-black/30 p-3" style={{ borderBottom: `4px solid ${FR[room.cur_bidder]?.color || 'transparent'}` }}><div className="text-xs text-slate-400">HIGHEST BIDDER</div><div className="flex items-center justify-center gap-2 text-xl font-bold">{room.cur_bidder && <Logo team={FR[room.cur_bidder]?.team} size={32} />}{FR[room.cur_bidder]?.team || '—'}</div></div></div>
         {mine && room.status === 'live' && <div className="mt-4 flex gap-3">
           <button disabled={room.cur_bidder === mine.id} onClick={() => act('bid', { p_amount: next })} className="btn flex-1 bg-amber-400 py-4 text-xl text-black">BID {cr(next)}</button>
           <button onClick={() => act('pass')} className="btn bg-white/10 py-4">PASS</button></div>}
+        <p className="mt-2 text-center text-xs text-slate-500">Bid steps: +5 L below ₹1 Cr · +10 L to ₹2 Cr · +20 L to ₹5 Cr · +25 L above</p>
         {room.status === 'paused' && <p className="mt-3 text-center text-amber-300">⏸ Auction paused by host</p>}
       </div> : <div className="card text-center text-xl">{room.status === 'review' ? 'First round finished — host can re-auction unsold players.' : room.status === 'done' ? 'Auction complete! See the Final tab.' : 'Waiting…'}</div>}
       <div className="card"><h3 className="font-semibold mb-2">Recent results</h3>
