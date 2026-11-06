@@ -149,6 +149,9 @@ function thud(when = 0, v = 0.6) {
 const sfx = {
   beep: () => tone(880, 0.1, 'square', 0.06), beepHi: () => tone(1320, 0.25, 'square', 0.08), bid: () => tone(520, 0.06, 'triangle', 0.07),
   sold: () => { thud(0); thud(0.22); tone(523, 0.18, 'triangle', 0.15, 0.5); tone(659, 0.18, 'triangle', 0.15, 0.65); tone(784, 0.4, 'triangle', 0.15, 0.8); },
+  once: () => thud(0, 0.35),
+  twice: () => { thud(0, 0.4); thud(0.28, 0.4); },
+  final: () => { thud(0, 0.45); thud(0.22, 0.45); thud(0.44, 0.5); tone(1000, 0.3, 'square', 0.06, 0.62); },
   unsold: () => { tone(300, 0.25, 'sawtooth', 0.08); tone(220, 0.45, 'sawtooth', 0.08, 0.22); },
 };
 
@@ -290,7 +293,7 @@ export default function Room({ params }) {
     </div>
     {msg && <p className="rounded-lg bg-red-500/20 p-2 text-sm">{msg}</p>}
     {!mine && <p className="rounded-lg bg-white/10 p-2 text-sm">You are watching as a spectator. Are you a player? <a className="text-amber-400 underline" href={`/rejoin?code=${code}`}>Rejoin with your PIN</a></p>}
-    {tab === 'Live' && (room.status === 'accel_pick' ? <AccelPick {...{ room, fr, rps, P, mine, isHost, act }} /> : <Live {...{ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act, autos, watch }} />)}
+    {tab === 'Live' && (room.status === 'accel_pick' ? <AccelPick {...{ room, fr, rps, P, mine, isHost, act }} /> : <Live {...{ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act, autos, watch, play }} />)}
     {tab === 'Results Table' && <Table {...{ rps, P, FR, fr, isHost, act, room }} />}
     {tab === 'My Franchise' && (mine ? <Squad f={mine} room={room} rps={rps} P={P} /> : <p className="card">You are watching as a spectator.</p>)}
     {tab === 'All Teams' && <div className="grid gap-4 md:grid-cols-2">{fr.map((f) => <Squad key={f.id} f={f} room={room} rps={rps} P={P} />)}</div>}
@@ -320,7 +323,7 @@ function Lobby({ room, fr, isHost, act, link, msg, mine, pin }) {
       {msg && <p className="text-sm text-red-400">{msg}</p>}</div>}</div>);
 }
 
-function Live({ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act, autos, watch }) {
+function Live({ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act, autos, watch, play }) {
   const watchSet = new Set(watch.map((w) => w.player_id));
   const p = cur && P[cur.player_id];
   const recent = [...rps].filter((x) => x.sold_at).sort((a, b) => new Date(b.sold_at) - new Date(a.sold_at)).slice(0, 6);
@@ -329,9 +332,16 @@ function Live({ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act, autos,
   const secs = Math.ceil(left / 1000), tot = room.timer_secs || 20;
   let call = null;   // "going once / twice" call as the timer runs down
   if (cur && room.status === 'live' && left > 0) {
-    const stage = secs <= 1 ? 3 : secs <= Math.min(3, Math.floor(tot * 0.3)) ? 2 : secs <= Math.min(5, Math.ceil(tot * 0.5)) ? 1 : 0;
+    const long = tot >= 15;   // 20 s timer: once <=6s, twice <=4s, final <=2s; 7 s accelerated timer: 4 / 3 / 2
+    const stage = secs <= 2 ? 3 : secs <= (long ? 4 : 3) ? 2 : secs <= (long ? 6 : 4) ? 1 : 0;
     if (stage) call = room.cur_bidder ? ['', 'Going once…', 'Going twice…', 'FINAL CALL…'][stage] : 'Any bids?';
   }
+  const lastCall = useRef(null);
+  useEffect(() => {   // sound for the calls (only when someone has bid)
+    if (call === lastCall.current) return;
+    lastCall.current = call;
+    if (call === 'Going once…') play('once'); else if (call === 'Going twice…') play('twice'); else if (call === 'FINAL CALL…') play('final');
+  }, [call]);
   const done = rps.filter((x) => x.status === 'sold' || x.status === 'unsold').length;
   const total = rps.length, sold = rps.filter((x) => x.status === 'sold').length;
   const myBids = bids.filter((b) => cur && b.rp_id === cur.id);
