@@ -66,3 +66,11 @@ Keep "Include retained stars" ticked: without them there are only 4 Indian cappe
 - **When the auction ends** (room status `done`) every slot must be a player you own, with a captain and a different vice-captain, then press **🔒 Lock my final XI** (can be unlocked again).
 - **Final tab** reveals every team's XI with C / VC / backups. Teams with no saved XI (bots, or players who never made one) are auto-picked and labelled as such.
 - Privacy is enforced by RLS: others only see your XI once it is locked or the auction is done. Saving/locking run in Postgres functions (`save_lineup`, `lock_lineup`, `unlock_lineup`).
+
+## Random auction order (run `supabase/update_random_order.sql` once)
+New rooms default to **Random mix**: capped players are auctioned first and uncapped after, but inside each phase every player is shuffled across all roles
+(an Indian capped batter can be followed by an overseas bowler, an all-rounder, a keeper...). A fresh shuffle is drawn for every room.
+Other choices on the Create form: **Fully random** (capped + uncapped mixed), **Fixed role blocks** (the old order) and **Official IPL set order**.
+Existing rooms keep the order they already have.
+
+**Role blocks** now also shuffle the players inside every block (e.g. the 15 Indian capped batters come in a different order each room); which players make each block is still decided by retained status and base price.

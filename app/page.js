@@ -8,7 +8,7 @@ import { InstallCard } from './install';
 
 function Form({ mode }) {
   const r = useRouter();
-  const [f, setF] = useState({ code: '', room: '', owner: '', team: '', sets: 99, retained: true, order: 'pattern' });
+  const [f, setF] = useState({ code: '', room: '', owner: '', team: '', sets: 99, retained: true, order: 'shuffle' });
   const [taken, setTaken] = useState([]);
   const [err, setErr] = useState(''); const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
@@ -43,7 +43,7 @@ function Form({ mode }) {
       </select></div>
     {mode === 'create' && <label className="block text-sm">Player pool: use first N auction sets (46 = all players)
       <input type="number" min="1" max="46" className="inp mt-1" value={f.sets} onChange={set('sets')} /></label>}
-    {mode === 'create' && <label className="block text-sm">Auction order<select className="inp mt-1" value={f.order} onChange={set('order')}><option value="pattern">Capped first in repeating blocks (15 Ind bat, 10 Os bat, 15 AR, 10 WK, 10+10 bowl), then uncapped, then accelerated round</option><option value="sets">Official IPL set order</option></select></label>}
+    {mode === 'create' && <label className="block text-sm">Auction order<select className="inp mt-1" value={f.order} onChange={set('order')}><option value="shuffle">Random mix — capped players first, then uncapped; shuffled across all roles (different every time), then accelerated round</option><option value="shuffle_all">Fully random — capped and uncapped all mixed together</option><option value="capped_first">Role blocks, shuffled inside — capped first (15 Ind bat, 10 Os bat, 15 AR, 10 WK, 10+10 bowl), then uncapped; order inside each block is random</option><option value="sets">Official IPL set order</option></select></label>}
     {mode === 'create' && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.retained} onChange={(e) => setF({ ...f, retained: e.target.checked })} /> Include retained stars (Kohli, Gill, Rohit… auctioned first)</label>}
     {err && <p className="text-red-400 text-sm">{err}</p>}
     <button disabled={busy} className="btn w-full bg-amber-400 text-black">{mode === 'create' ? 'Create room' : 'Join room'}</button>
