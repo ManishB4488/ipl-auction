@@ -56,10 +56,3 @@ Default order is **Capped first, then Uncapped**: 15 Indian batters, 10 overseas
 10 overseas bowlers (all capped), then every uncapped player as batters → all-rounders → wicketkeepers → bowlers. Capped players beyond those
 block sizes are auctioned at the end of the capped phase, before any uncapped player. Block sizes are the `p_quota` argument of `create_room`.
 Keep "Include retained stars" ticked: without them there are only 4 Indian capped batters, so the 15-player block can't fill.
-
-## Playing XI + backups (run `supabase/update_lineups.sql` — safe to run again)
-The **Playing XI** tab is available as soon as the auction starts, so teams plan their XI while they buy. Each team has 11 batting-order slots, up to 3 backups per
-position, a captain and a vice-captain. Changes autosave; the Live tab shows a "My Playing XI" card that says whether the player on the block fills a gap.
-Buttons: ➕ Fill empty slots (keeps your picks), ✨ Auto-pick all, Clear. When the auction is **done**, press **Finalise** (needs 11 players + C + VC); a finalised
-XI is locked until you press Unlock. Other teams' XIs stay hidden until the auction is over, then everyone sees them. Everything is validated on the server
-(`save_lineup`): only players your team bought, no duplicates, max 4 overseas.
