@@ -31,7 +31,7 @@ function Form({ mode }) {
     } catch (x) { setErr(/duplicate/i.test(x.message) ? 'That team is already taken in this room — pick another.' : x.message); setBusy(false); }
   }
   return (<form onSubmit={go} className="card space-y-3">
-    <h2 className="text-lg font-bold">{mode === 'create' ? 'Create Auction (you are the host)' : 'Join Auction'}</h2>
+    <h2 className="text-2xl font-bold uppercase">{mode === 'create' ? 'Create Auction (you are the host)' : 'Join Auction'}</h2>
     {mode === 'create' ? <input required className="inp" placeholder="Auction room name" value={f.room} onChange={set('room')} />
       : <input required className="inp uppercase" placeholder="Room code" value={f.code} onChange={set('code')} />}
     <input required className="inp" placeholder="Your display name" value={f.owner} onChange={set('owner')} />
@@ -51,8 +51,11 @@ function Form({ mode }) {
 }
 export default function Home() {
   return (<div className="space-y-6">
-    <section className="text-center py-6"><h1 className="text-3xl md:text-5xl font-extrabold">Run your own IPL 2026 mega auction</h1>
-      <p className="mt-3 text-slate-300">3–10 friends · pick an IPL franchise · ₹120 Cr purse · empty seats are filled by AI bot teams.</p></section>
+    <section className="relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-ipl-blue/40 via-ipl-deep to-ipl-navy px-6 py-10 text-center shadow-2xl shadow-black/40">
+      <div className="pointer-events-none absolute -right-16 -top-16 h-64 w-64 rounded-full bg-amber-400/25 blur-3xl" />
+      <p className="font-display text-sm font-bold uppercase tracking-[.4em] text-amber-400">Mega Auction · 2026</p>
+      <h1 className="mt-2 font-display text-5xl font-extrabold uppercase leading-none text-white md:text-7xl">Build your <span className="text-amber-400">dream XI</span></h1>
+      <p className="mx-auto mt-4 max-w-2xl text-slate-300">3–10 friends · pick an IPL franchise · ₹120 Cr purse · bid live, then pick your playing XI with captain, vice-captain and backups. Empty seats are filled by AI bot teams.</p></section>
     <div className="grid gap-4 md:grid-cols-2"><Form mode="create" /><Form mode="join" /></div>
     <InstallCard />
     <p className="text-center text-sm text-slate-400">Spectators: just open the room link your host shares. · <a href="/rejoin" className="text-amber-400 underline">Lost access to your team? Rejoin with your PIN</a></p></div>);

@@ -250,7 +250,7 @@ export function XiEditor({ xi, room, rps, P, FR, watch }) {
 
   return (<div className="space-y-4">
     <div className="card space-y-3">
-      <div className="flex flex-wrap items-center gap-2"><h2 className="mr-auto text-xl font-bold">📋 My Playing XI</h2>
+      <div className="flex flex-wrap items-center gap-2"><h2 className="mr-auto font-display text-3xl font-extrabold uppercase">📋 My Playing XI</h2>
         <span className="text-xs text-slate-400">{xi.status === 'saving' ? 'Saving…' : xi.status === 'saved' ? '✓ Saved' : xi.status}</span></div>
       {locked
         ? <p className="rounded-lg bg-green-600/25 p-2 text-sm">🔒 <b>Finalised.</b> Everyone can see your XI in the Final tab. <button className="ml-2 underline" onClick={xi.unlock}>Unlock to edit</button></p>
@@ -292,7 +292,7 @@ export function XiEditor({ xi, room, rps, P, FR, watch }) {
     })}</div>
 
     <div className="card space-y-2 text-sm">
-      <h3 className="font-semibold">Bench ({bench.length})</h3>
+      <h3 className="font-display text-xl uppercase tracking-wide">Bench ({bench.length})</h3>
       {bench.length === 0 ? <p className="text-xs text-slate-400">Players you buy that are not in the XI show up here.</p>
         : <p className="text-xs text-slate-300">{bench.map((o) => `${o.p.name} (${SHORT[o.p.role]})`).join(' · ')}</p>}
       {S.warnings.map((w) => <p key={w} className="text-xs text-amber-300">⚠ {w}</p>)}
@@ -310,7 +310,7 @@ export function XiMini({ xi, setTab, P }) {
   if (!lu || !S) return null;
   const icon = { owned: '✅', target: '🎯', lost: '❌', unsold: '⚠', gone: '', empty: '' };
   return (<div className="card space-y-1">
-    <div className="flex items-center justify-between"><h3 className="font-semibold">📋 My XI <span className="text-xs font-normal text-slate-400">{S.planned}/11 planned · {S.ownedN} owned</span></h3>
+    <div className="flex items-center justify-between"><h3 className="font-display text-xl uppercase tracking-wide">📋 My XI <span className="text-xs font-normal text-slate-400">{S.planned}/11 planned · {S.ownedN} owned</span></h3>
       <button onClick={() => setTab('My XI')} className="rounded bg-white/10 px-2 py-0.5 text-xs">{lu.locked ? '🔒 View' : 'Edit'}</button></div>
     {xi.note && <p className="rounded bg-green-600/20 p-1 text-xs">{xi.note}</p>}
     <ul className="divide-y divide-white/10 text-xs">{lu.slots.map((s, i) => {
@@ -349,7 +349,7 @@ function XiCard({ f, row, rps, P, FR }) {
   const ok = (pid) => pid != null && stateOf(pid).k === 'owned' && P[pid];
   const os = lu.slots.filter((s) => ok(s.pid) && P[s.pid].overseas).length;
   return (<div className="card space-y-2" style={{ borderColor: f.color }}>
-    <div className="flex flex-wrap items-center gap-2"><h3 className="mr-auto text-lg font-bold" style={{ color: f.color }}>{f.team}</h3><span className={`rounded-full px-2 py-1 text-xs ${badge[1]}`}>{badge[0]}</span></div>
+    <div className="flex flex-wrap items-center gap-2"><h3 className="mr-auto font-display text-2xl font-extrabold uppercase" style={{ color: f.color }}>{f.team}</h3><span className={`rounded-full px-2 py-1 text-xs ${badge[1]}`}>{badge[0]}</span></div>
     <p className="text-xs text-slate-400">{f.owner} · ✈ {os}/{MAX_OS_XI} overseas in XI</p>
     <ol className="divide-y divide-white/10 text-sm">{lu.slots.map((s, i) => {
       const pl = ok(s.pid) ? P[s.pid] : null, bk = (lu.backups[i] || []).filter((pid) => P[pid] && stateOf(pid).k === 'owned');
@@ -363,6 +363,6 @@ function XiCard({ f, row, rps, P, FR }) {
 export function XiShowcase({ fr, rows, rps, P, FR, room, mine }) {
   if (room.status !== 'done') return <div className="card text-sm text-slate-300">🏏 Playing XIs with captains and backups are revealed here when the auction ends.{mine ? ' Plan yours any time in the “My XI” tab.' : ''}</div>;
   const ordered = [...fr].sort((a, b) => (a.id === mine?.id ? -1 : b.id === mine?.id ? 1 : 0));
-  return (<div className="space-y-2"><h3 className="text-lg font-bold">📋 Playing XIs</h3>
+  return (<div className="space-y-2"><h3 className="font-display text-3xl font-extrabold uppercase">📋 Playing XIs</h3>
     <div className="grid gap-4 md:grid-cols-2">{ordered.map((f) => <XiCard key={f.id} f={f} row={(rows || []).find((r) => r.franchise_id === f.id)} rps={rps} P={P} FR={FR} />)}</div></div>);
 }

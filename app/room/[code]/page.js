@@ -20,12 +20,13 @@ function useWiki(name) {
   }, [name]);
   return v || {};
 }
-function Photo({ name, size = 96 }) {
+function Photo({ name, size = 96, spot = false }) {
   const { src } = useWiki(name);
   const initials = name.split(' ').map((w) => w[0]).slice(0, 2).join('');
   const box = { width: size, height: size };
-  return src ? <img src={src} alt={name} referrerPolicy="no-referrer" style={box} className="shrink-0 rounded-2xl bg-white/10 object-cover object-top" />
-    : <div style={box} className="grid shrink-0 place-items-center rounded-2xl bg-white/10 font-bold text-amber-300">{initials}</div>;
+  const cls = `shrink-0 rounded-2xl ${spot ? 'player-photo' : ''}`;
+  return src ? <img src={src} alt={name} referrerPolicy="no-referrer" style={box} className={`${cls} bg-white/10 object-cover object-top`} />
+    : <div style={box} className={`${cls} grid place-items-center bg-white/10 font-bold text-amber-300`}>{initials}</div>;
 }
 function PlayerInfo({ p, rp, room }) {
   const info = useWiki(p.name);
@@ -61,7 +62,7 @@ function Needs({ room, mine, rps, P, cur, xi }) {
   const xiOpen = curP ? xiFree.find(({ x }) => x.want === curP.role) : null;
   let hint = null;
   if (curP) hint = (curP.overseas && osLeft === 0) ? ['⚠ You have no overseas slot left for this player', 'bg-red-500/20'] : xiAt >= 0 ? [`📋 Already planned in your XI at #${xiAt + 1}`, 'bg-green-600/25'] : xiOpen ? [`🎯 Fills open XI slot #${xiOpen.i + 1} (${curP.role})`, 'bg-green-600/25'] : Math.max(TARGETS[curP.role] - have(curP.role), 0) > 0 ? ['🎯 This player fills a need in your squad', 'bg-green-600/25'] : ['This role is already covered in your squad', 'bg-white/10'];
-  return (<div className="card space-y-2"><h3 className="font-semibold">What my team needs</h3>
+  return (<div className="card space-y-2"><h3 className="font-display text-xl uppercase tracking-wide">What my team needs</h3>
     <div className="grid grid-cols-2 gap-2 text-center text-xs">{ROLES.map(([role, label]) => { const need = Math.max(TARGETS[role] - have(role), 0); return <div key={role} className={`rounded-lg p-2 ${need ? 'bg-amber-400/15' : 'bg-green-600/20'} ${curP && curP.role === role ? 'ring-1 ring-amber-300' : ''}`}>
       <div className="text-slate-300">{label}</div><div className="text-base font-bold">{have(role)}/{TARGETS[role]}</div><div>{need ? `need ${need} more` : '✅ covered'}</div></div>; })}</div>
     <p className="text-xs text-slate-400">Suggested balance only — you can build any squad you like.</p>
@@ -304,11 +305,11 @@ export default function Room({ params }) {
   return (<div className="space-y-4">
     {moment && <SoldOverlay m={moment} P={P} FR={FR} onClose={() => setMoment(null)} />}
     <div className="flex flex-wrap items-center gap-2">
-      <h1 className="text-xl font-bold mr-auto">{room.name} <span className="text-sm text-slate-400">#{room.code} · {room.status.replace('_', ' ').toUpperCase()}</span></h1>
+      <h1 className="mr-auto font-display text-3xl font-extrabold uppercase">{room.name} <span className="font-sans text-sm font-normal normal-case text-slate-400">#{room.code} · {room.status.replace('_', ' ').toUpperCase()}</span></h1>
       <button onClick={toggleSound} className="btn bg-white/10 text-sm">{sound ? '🔊 Sound ON' : '🔇 Sound OFF'}</button>
       {room.status !== 'lobby' && <span className="rounded-full bg-white/10 px-2 py-1 text-xs">🤖 Bots {room.fill_bots ? 'ON' : 'OFF'}</span>}
       {mine && pin && <PinBadge pin={pin} />}
-      {TABS.map((t) => <button key={t} onClick={() => setTab(t)} className={`btn text-sm ${tab === t ? 'bg-amber-400 text-black' : 'bg-white/10'}`}>{t}</button>)}
+      {TABS.map((t) => <button key={t} onClick={() => setTab(t)} className={`tab-pill ${tab === t ? 'tab-on' : ''}`}>{t}</button>)}
     </div>
     {msg && <p className="rounded-lg bg-red-500/20 p-2 text-sm">{msg}</p>}
     {!mine && <p className="rounded-lg bg-white/10 p-2 text-sm">You are watching as a spectator. Are you a player? <a className="text-amber-400 underline" href={`/rejoin?code=${code}`}>Rejoin with your PIN</a></p>}
@@ -325,21 +326,21 @@ function Lobby({ room, fr, isHost, act, link, msg, mine, pin }) {
   const [r, setR] = useState({ p_purse: room.purse_lakh / 100, p_min: room.min_squad, p_max: room.max_squad, p_os: room.max_overseas, p_timer: room.timer_secs, p_spec: room.spectators, p_bots: room.fill_bots });
   const n = (k) => (e) => setR({ ...r, [k]: +e.target.value });
   return (<div className="grid gap-4 md:grid-cols-2">
-    <div className="card space-y-3"><h1 className="text-2xl font-bold">{room.name}</h1>
-      <p>Room code: <b className="text-3xl tracking-widest text-amber-400">{room.code}</b></p>
+    <div className="card space-y-3"><h1 className="font-display text-4xl font-extrabold uppercase">{room.name}</h1>
+      <div className="rounded-2xl border border-amber-400/40 bg-amber-400/10 p-3 text-center"><p className="text-xs font-semibold uppercase tracking-[.3em] text-slate-300">Room code</p><b className="font-display text-6xl tracking-[.25em] text-amber-400">{room.code}</b></div>
       <input readOnly className="inp text-sm" value={link} onFocus={(e) => e.target.select()} />
       <button className="btn bg-white/10" onClick={() => navigator.clipboard?.writeText(link)}>Copy invite link</button>
-      <h3 className="font-semibold pt-2">Franchises ({fr.length}/10)</h3>
-      {fr.map((f) => <div key={f.id} className="flex items-center gap-2"><Logo team={f.team} size={28} />{f.team} <span className="text-slate-400 text-sm">— {f.owner}{f.user_id === room.host_id && ' (host)'}{f.is_bot && ' 🤖'}</span></div>)}
+      <h3 className="font-display text-xl uppercase tracking-wide pt-2">Franchises ({fr.length}/10)</h3>
+      {fr.map((f) => <div key={f.id} className="flex items-center gap-2 rounded-xl border border-white/10 bg-black/20 p-2" style={{ borderLeft: `4px solid ${f.color}` }}><Logo team={f.team} size={28} /><b>{f.team}</b> <span className="text-slate-400 text-sm">— {f.owner}{f.user_id === room.host_id && ' (host)'}{f.is_bot && ' 🤖'}</span></div>)}
       {pin && <div className="rounded-lg border border-amber-400/40 bg-amber-400/10 p-3 text-sm">🔑 Your recovery PIN: <b className="tracking-widest">{pin}</b><br />Save it. If you change phone or lose access, use “Rejoin with PIN” on the home page.</div>}
       {!isHost && <p className="text-sm text-slate-400">Waiting for the host to start…</p>}</div>
-    {isHost && <div className="card space-y-2"><h3 className="font-semibold">Custom rules (not official IPL rules)</h3>
+    {isHost && <div className="card space-y-2"><h3 className="font-display text-xl uppercase tracking-wide">Custom rules (not official IPL rules)</h3>
       {[['Purse (₹ Cr)', 'p_purse'], ['Min squad', 'p_min'], ['Max squad', 'p_max'], ['Max overseas', 'p_os'], ['Timer (sec)', 'p_timer']].map(([l, k]) =>
         <label key={k} className="flex items-center gap-2 text-sm"><span className="w-32">{l}</span><input type="number" className="inp" value={r[k]} onChange={n(k)} /></label>)}
       <label className="flex gap-2 text-sm"><input type="checkbox" checked={r.p_bots} onChange={(e) => setR({ ...r, p_bots: e.target.checked })} /> Fill empty seats with AI bot teams (up to 10 teams)</label>
       <label className="flex gap-2 text-sm"><input type="checkbox" checked={r.p_spec} onChange={(e) => setR({ ...r, p_spec: e.target.checked })} /> Allow spectators</label>
       <button className="btn bg-white/10" onClick={() => act('set_rules', { ...r, p_purse: Math.round(r.p_purse * 100) })}>Save rules</button>
-      <button disabled={fr.length < 3} className="btn w-full bg-green-500 text-black" onClick={() => act('start_room')}>Start auction {fr.length < 3 && '(need 3+)'}</button>
+      <button disabled={fr.length < 3} className="btn w-full bg-green-500 py-3 font-display text-2xl uppercase text-black" onClick={() => act('start_room')}>Start auction {fr.length < 3 && '(need 3+)'}</button>
       {msg && <p className="text-sm text-red-400">{msg}</p>}</div>}</div>);
 }
 
@@ -367,33 +368,33 @@ function Live({ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act, autos,
   const myBids = bids.filter((b) => cur && b.rp_id === cur.id);
   return (<div className="grid gap-4 lg:grid-cols-3">
     <div className="lg:col-span-2 space-y-4">
-      {last && <div key={last.id} className="pop flex items-center justify-center gap-3 rounded-xl p-3 text-center font-bold" style={{ background: last.status === 'sold' ? '#16a34a55' : '#dc262655' }}><Photo name={P[last.player_id]?.name || '?'} size={56} />
+      {last && <div key={last.id} className="pop flex items-center justify-center gap-3 rounded-xl border border-white/10 p-3 text-center font-display text-xl font-bold uppercase tracking-wide" style={{ background: last.status === 'sold' ? `linear-gradient(90deg, ${FR[last.sold_to]?.color || '#16a34a'}99, #16a34a33 70%)` : 'linear-gradient(90deg, #dc262699, #dc262622 70%)' }}><Photo name={P[last.player_id]?.name || '?'} size={56} />
         {last.status === 'sold' ? `🔨 SOLD! ${P[last.player_id]?.name} → ${FR[last.sold_to]?.team} for ${cr(last.sold_lakh)}` : `❌ UNSOLD: ${P[last.player_id]?.name}`}</div>}
-      {p ? <div className={`card pop ${watchSet.has(p.id) ? 'ring-2 ring-yellow-300' : ''}`} key={cur.id}>
+      {p ? <div className={`card spot pop ${watchSet.has(p.id) ? 'ring-2 ring-yellow-300' : ''}`} key={cur.id} style={{ '--glow': FR[room.cur_bidder]?.color || '#ff8a1f' }}>
         {watchSet.has(p.id) && <div className="mb-2 rounded-lg bg-yellow-300/20 p-1 text-center text-sm font-bold text-yellow-200">⭐ On your watchlist</div>}
         <div className="flex flex-wrap items-center gap-4">
-          <Photo name={p.name} />
-          <div className="flex-1"><h2 className="text-3xl font-extrabold">{p.name}{mine && <button title="Add to watchlist" onClick={() => act('toggle_watch', { p_player: p.id })} className="ml-2 text-3xl text-yellow-300">{watchSet.has(p.id) ? '★' : '☆'}</button>}</h2>
+          <Photo name={p.name} size={132} spot />
+          <div className="flex-1"><h2 className="name-plate text-4xl font-extrabold md:text-5xl">{p.name}{mine && <button title="Add to watchlist" onClick={() => act('toggle_watch', { p_player: p.id })} className="ml-2 text-3xl text-yellow-300">{watchSet.has(p.id) ? '★' : '☆'}</button>}</h2>
             <PlayerInfo p={p} rp={cur} room={room} />{mine && <QuickSlot xi={xi} p={p} />}</div>
-          <div className={`text-5xl font-black tabular-nums ${left < 5000 ? 'text-red-400' : 'text-amber-400'}`}>{Math.ceil(left / 1000)}s</div></div>
+          <div className={`score grid h-20 w-20 place-items-center rounded-full border-4 text-4xl font-extrabold tabular-nums ${left < 5000 ? 'animate-pulse border-red-500 text-red-400' : 'border-amber-400 text-amber-400'}`}>{Math.ceil(left / 1000)}</div></div>
         {call && <div key={call} className="pop mt-3 rounded-xl bg-amber-400/15 p-2 text-center text-xl font-extrabold text-amber-300">🔨 {call}</div>}
         <div className="mt-4 grid grid-cols-2 gap-3 text-center">
-          <div className="rounded-xl bg-black/30 p-3"><div className="text-xs text-slate-400">CURRENT BID</div><div className="text-3xl font-bold">{room.cur_bidder ? cr(room.cur_bid) : 'No bids'}</div><div className="mt-1 text-xs text-slate-400">{room.cur_bidder ? `Next bid ${cr(next)} (+${cr(inc(room.cur_bid))})` : `Opens at ${cr(next)} (base price)`}</div></div>
-          <div className="rounded-xl bg-black/30 p-3" style={{ borderBottom: `4px solid ${FR[room.cur_bidder]?.color || 'transparent'}` }}><div className="text-xs text-slate-400">HIGHEST BIDDER</div><div className="flex items-center justify-center gap-2 text-xl font-bold">{room.cur_bidder && <Logo team={FR[room.cur_bidder]?.team} size={32} />}{FR[room.cur_bidder]?.team || '—'}</div></div></div>
+          <div className="stat-tile"><div className="text-xs font-semibold tracking-widest text-slate-400">CURRENT BID</div><div className="score text-5xl font-extrabold text-white">{room.cur_bidder ? cr(room.cur_bid) : 'No bids'}</div><div className="mt-1 text-xs text-slate-400">{room.cur_bidder ? `Next bid ${cr(next)} (+${cr(inc(room.cur_bid))})` : `Opens at ${cr(next)} (base price)`}</div></div>
+          <div className="stat-tile" style={{ borderBottom: `4px solid ${FR[room.cur_bidder]?.color || 'transparent'}` }}><div className="text-xs font-semibold tracking-widest text-slate-400">HIGHEST BIDDER</div><div className="score flex items-center justify-center gap-2 text-3xl font-bold uppercase">{room.cur_bidder && <Logo team={FR[room.cur_bidder]?.team} size={32} />}{FR[room.cur_bidder]?.team || '—'}</div></div></div>
         {mine && room.status === 'live' && <div className="mt-4 flex gap-3">
-          <button disabled={room.cur_bidder === mine.id} onClick={() => act('bid', { p_amount: next })} className="btn flex-1 bg-amber-400 py-4 text-xl text-black">BID {cr(next)}</button>
+          <button disabled={room.cur_bidder === mine.id} onClick={() => act('bid', { p_amount: next })} className="btn flex-1 bg-amber-400 py-4 font-display text-3xl uppercase text-black">Bid {cr(next)}</button>
           <button onClick={() => act('pass')} className="btn bg-white/10 py-4">PASS</button></div>}
         {mine && room.status === 'live' && <AutoBid rp={cur} autos={autos} act={act} />}
         <p className="mt-2 text-center text-xs text-slate-500">Bid steps: +5 L below ₹1 Cr · +10 L to ₹2 Cr · +20 L to ₹5 Cr · +25 L above</p>
         {room.status === 'paused' && <p className="mt-3 text-center text-amber-300">⏸ Auction paused by host</p>}
       </div> : <div className="card text-center text-xl">{room.status === 'review' ? 'First round finished — host can re-auction unsold players.' : room.status === 'done' ? 'Auction complete! See the Final tab.' : 'Waiting…'}</div>}
-      <div className="card"><h3 className="font-semibold mb-2">Recent results</h3>
-        {recent.length === 0 ? <p className="text-sm text-slate-400">Nothing sold yet</p> : recent.map((r) => <div key={r.id} className="flex items-center gap-2 py-1 text-sm">
+      <div className="card"><h3 className="font-display text-xl uppercase tracking-wide mb-2">Recent results</h3>
+        {recent.length === 0 ? <p className="text-sm text-slate-400">Nothing sold yet</p> : recent.map((r) => <div key={r.id} className="flex items-center gap-2 border-b border-white/5 py-1 text-sm" style={{ borderLeft: `3px solid ${r.status === 'sold' ? FR[r.sold_to]?.color || '#16a34a' : '#dc2626'}`, paddingLeft: 8 }}>
           <Photo name={P[r.player_id]?.name || '?'} size={32} /><span className="flex-1">{P[r.player_id]?.name}</span>
           {r.status === 'sold' ? <><span style={{ color: FR[r.sold_to]?.color }}>{FR[r.sold_to]?.team}</span><b>{cr(r.sold_lakh)}</b></> : <span className="text-red-400">UNSOLD</span>}</div>)}</div>
-      <div className="card"><h3 className="font-semibold mb-2">Bid history (this player)</h3>
-        {myBids.length === 0 ? <p className="text-sm text-slate-400">No bids yet</p> : myBids.slice(0, 8).map((b) => <div key={b.id} className="flex justify-between text-sm"><span>{FR[b.franchise_id]?.team}</span><b>{cr(b.amount)}</b></div>)}</div>
-      {isHost && <div className="card flex flex-wrap gap-2"><span className="font-semibold mr-2">Host:</span>
+      <div className="card"><h3 className="font-display text-xl uppercase tracking-wide mb-2">Bid history (this player)</h3>
+        {myBids.length === 0 ? <p className="text-sm text-slate-400">No bids yet</p> : myBids.slice(0, 8).map((b, i) => <div key={b.id} className="flex items-center justify-between border-b border-white/5 py-1 text-sm"><span className="flex items-center gap-2"><i className="h-2.5 w-2.5 rounded-full" style={{ background: FR[b.franchise_id]?.color }} />{FR[b.franchise_id]?.team}</span><b className={`score text-xl ${i === 0 ? 'text-amber-400' : ''}`}>{cr(b.amount)}</b></div>)}</div>
+      {isHost && <div className="card flex flex-wrap gap-2"><span className="mr-2 font-display text-xl font-bold uppercase text-amber-400">Host controls</span>
         {room.status === 'live' && <button className="btn bg-white/10" onClick={() => act('host_pause')}>Pause</button>}
         {room.status === 'paused' && <button className="btn bg-green-500 text-black" onClick={() => act('host_resume')}>Resume</button>}
         <button className="btn bg-white/10" onClick={() => act('host_skip')}>Skip (to end of queue)</button>
@@ -404,16 +405,21 @@ function Live({ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act, autos,
         {room.status === 'review' && <button className="btn bg-amber-400 text-black" onClick={() => act('host_reauction')}>Re-auction unsold</button>}
         <button className="btn bg-red-500/70" onClick={() => confirm('End the auction?') && act('host_end')}>End auction</button></div>}
     </div>
-    <div className="space-y-4"><div className="card"><h3 className="font-semibold">Progress</h3>
-      <p className="text-sm">{done}/{total} auctioned · {sold} sold · {rps.filter((x) => x.status === 'unsold').length} unsold · {rps.filter((x) => x.status === 'pending').length} remaining</p>
-      <div className="mt-2 h-2 rounded bg-white/10"><div className="h-2 rounded bg-amber-400" style={{ width: `${(done / Math.max(total, 1)) * 100}%` }} /></div></div>
+    <div className="space-y-4"><div className="card"><h3 className="font-display text-xl uppercase tracking-wide">Progress</h3>
+      <div className="mt-2 grid grid-cols-3 gap-2 text-center"><div className="stat-tile"><div className="score text-3xl font-extrabold text-green-400">{sold}</div><div className="text-[10px] uppercase tracking-widest text-slate-400">Sold</div></div>
+        <div className="stat-tile"><div className="score text-3xl font-extrabold text-red-400">{rps.filter((x) => x.status === 'unsold').length}</div><div className="text-[10px] uppercase tracking-widest text-slate-400">Unsold</div></div>
+        <div className="stat-tile"><div className="score text-3xl font-extrabold text-white">{rps.filter((x) => x.status === 'pending').length}</div><div className="text-[10px] uppercase tracking-widest text-slate-400">To come</div></div></div>
+      <div className="mt-3 h-2 rounded-full bg-white/10"><div className="h-2 rounded-full bg-gradient-to-r from-amber-300 to-amber-500" style={{ width: `${(done / Math.max(total, 1)) * 100}%` }} /></div>
+      <p className="mt-1 text-right text-xs text-slate-400">{done}/{total} auctioned</p></div>
       {mine && <Needs room={room} mine={mine} rps={rps} P={P} cur={cur} xi={xi} />}
       {mine && <XiMini xi={xi} setTab={setTab} P={P} />}
       {mine && <Watchlist watch={watch} rps={rps} P={P} autos={autos} act={act} />}
       <Upcoming rps={rps} P={P} cur={cur} isHost={isHost} act={act} watchSet={watchSet} mine={mine} />
-      <div className="card space-y-2"><h3 className="font-semibold">Teams</h3>{fr.map((f) => <div key={f.id} className="flex items-center gap-2 text-sm">
-        <Logo team={f.team} size={22} /><span className="flex-1 truncate">{f.team}{f.is_bot && ' 🤖'}</span>
-        <span>{cr(room.purse_lakh - f.spent_lakh)}</span><span className="text-slate-400">{f.squad_count}p · {f.os_count}/{room.max_overseas}os</span></div>)}</div></div>
+      <div className="card space-y-2"><h3 className="font-display text-xl uppercase tracking-wide">Teams</h3>{fr.map((f) => { const purseLeft = room.purse_lakh - f.spent_lakh, lead = room.cur_bidder === f.id; return (
+        <div key={f.id} className={`rounded-xl border p-2 text-sm ${lead ? 'border-amber-400 bg-amber-400/10' : 'border-white/10 bg-black/20'}`} style={{ borderLeft: `4px solid ${f.color}` }}>
+          <div className="flex items-center gap-2"><Logo team={f.team} size={24} /><span className="flex-1 truncate font-semibold">{f.team}{f.is_bot && ' 🤖'}{mine?.id === f.id && <span className="ml-1 rounded bg-white/15 px-1 text-[10px] font-bold">YOU</span>}{lead && ' 🔥'}</span><b className="score text-lg">{cr(purseLeft)}</b></div>
+          <div className="mt-1 h-1.5 rounded-full bg-white/10"><div className="h-1.5 rounded-full" style={{ width: `${Math.max(0, (purseLeft / room.purse_lakh) * 100)}%`, background: f.color }} /></div>
+          <div className="mt-1 flex justify-between text-xs text-slate-400"><span>{f.squad_count} players</span><span>✈ {f.os_count}/{room.max_overseas}</span></div></div>); })}</div></div>
   </div>);
 }
 
@@ -440,21 +446,21 @@ function Table({ rps, P, FR, fr, isHost, act, room }) {
     <S v={sort} set={setSort} ph="Auction order" opts={[['role', 'Group by category'], ['price', 'Sort: price'], ['team', 'Sort: team'], ['name', 'Sort: A–Z']]} />
     <button className="btn bg-white/10" onClick={csv}>Export CSV (opens in Excel)</button></div>
     <p className="text-xs text-slate-400">{rows.length} players · base prices are the official IPL 2026 reserve prices</p>
-    <div className="overflow-x-auto"><table className="w-full text-sm"><thead className="text-left text-slate-400"><tr>{['Player', 'Role', 'Nationality', 'Cat.', 'Set', 'Base', 'Sold', 'Bought by', 'Status'].map((h) => <th key={h} className="p-2">{h}</th>)}</tr></thead>
-      <tbody>{rows.map(({ r, p }) => <tr key={r.id} className="border-t border-white/10"><td className="p-2 font-medium">{p.name}</td><td>{p.role}</td><td>{p.country}</td><td>{p.capped}</td><td>{p.set_code}</td>
+    <div className="overflow-x-auto"><table className="w-full text-sm"><thead className="text-left font-display text-base uppercase tracking-wider text-amber-400"><tr>{['Player', 'Role', 'Nationality', 'Cat.', 'Set', 'Base', 'Sold', 'Bought by', 'Status'].map((h) => <th key={h} className="p-2">{h}</th>)}</tr></thead>
+      <tbody>{rows.map(({ r, p }) => <tr key={r.id} className="border-t border-white/10 odd:bg-white/[0.03] hover:bg-amber-400/10"><td className="p-2 font-medium">{p.name}</td><td>{p.role}</td><td>{p.country}</td><td>{p.capped}</td><td>{p.set_code}</td>
         <td>{isHost && r.status === 'pending' ? <button className="underline" onClick={() => { const v = prompt('New base price in lakh', r.base_lakh); v && act('host_set_base', { p_rp: r.id, p_lakh: +v }); }}>{cr(r.base_lakh)}</button> : cr(r.base_lakh)}</td>
         <td>{cr(r.sold_lakh)}</td><td>{FR[r.sold_to]?.team || '—'}</td>
-        <td className={r.status === 'sold' ? 'text-green-400' : r.status === 'unsold' ? 'text-red-400' : 'text-slate-400'}>{r.status.toUpperCase()}</td></tr>)}</tbody></table></div></div>);
+        <td><span className={`rounded-full px-2 py-0.5 text-xs font-bold ${r.status === 'sold' ? 'bg-green-500/20 text-green-300' : r.status === 'unsold' ? 'bg-red-500/20 text-red-300' : 'bg-white/10 text-slate-400'}`}>{r.status.toUpperCase()}</span></td></tr>)}</tbody></table></div></div>);
 }
 
 function Squad({ f, room, rps, P }) {
   const sq = rps.filter((r) => r.sold_to === f.id).map((r) => ({ ...r, p: P[r.player_id] }));
   const cnt = (role) => sq.filter((x) => x.p?.role === role).length;
   const top = sq.reduce((m, x) => (x.sold_lakh > (m?.sold_lakh || 0) ? x : m), null);
-  return (<div className="card space-y-2" style={{ borderColor: f.color }}>
-    <h3 className="flex items-center gap-2 text-xl font-bold" style={{ color: f.color }}><Logo team={f.team} size={32} />{f.team} <span className="text-sm text-slate-400">— {f.owner}</span></h3>
-    <div className="grid grid-cols-3 gap-2 text-center text-sm"><div className="rounded bg-black/30 p-2">Purse<br /><b>{cr(room.purse_lakh - f.spent_lakh)}</b></div>
-      <div className="rounded bg-black/30 p-2">Spent<br /><b>{cr(f.spent_lakh)}</b></div><div className="rounded bg-black/30 p-2">Avg<br /><b>{sq.length ? cr(Math.round(f.spent_lakh / sq.length)) : '—'}</b></div></div>
+  return (<div className="card space-y-2" style={{ borderColor: f.color, background: `linear-gradient(180deg, ${f.color}2e, transparent 45%)` }}>
+    <h3 className="flex items-center gap-2 font-display text-3xl font-extrabold uppercase" style={{ color: f.color }}><Logo team={f.team} size={32} />{f.team} <span className="text-sm text-slate-400">— {f.owner}</span></h3>
+    <div className="grid grid-cols-3 gap-2 text-center text-sm"><div className="stat-tile p-2">Purse<br /><b className="score text-xl">{cr(room.purse_lakh - f.spent_lakh)}</b></div>
+      <div className="stat-tile p-2">Spent<br /><b className="score text-xl">{cr(f.spent_lakh)}</b></div><div className="stat-tile p-2">Avg<br /><b className="score text-xl">{sq.length ? cr(Math.round(f.spent_lakh / sq.length)) : '—'}</b></div></div>
     <p className="text-sm text-slate-300">{f.squad_count}/{room.max_squad} players (min {room.min_squad}) · 🇮🇳 {f.squad_count - f.os_count} · ✈ {f.os_count}/{room.max_overseas} · Slots left {room.max_squad - f.squad_count}</p>
     <p className="text-sm text-slate-300">BAT {cnt('Batter')} · BOWL {cnt('Bowler')} · AR {cnt('All-rounder')} · WK {cnt('Wicketkeeper')}{top && ` · Top buy: ${top.p.name} (${cr(top.sold_lakh)})`}</p>
     {ROLES.map(([role, label]) => { const g = sq.filter((x) => x.p?.role === role); return g.length ? <div key={role}>
