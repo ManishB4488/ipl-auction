@@ -2,27 +2,121 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { sb, ensureUser, cr, setLabel } from '../../../lib/supabase';
 import { Logo } from '../../components';
+import { squadImage, leaderboardImage, shareBlob } from '../../shareimage';
 
 const inc = (c) => (c < 100 ? 5 : c < 200 ? 10 : c < 500 ? 20 : 25);
-const photoCache = {};
-function Photo({ name, size = 96 }) {
-  const [src, setSrc] = useState(photoCache[name]);
+const wikiCache = {};
+function useWiki(name) {
+  const [v, setV] = useState(wikiCache[name]);
   useEffect(() => {
-    if (photoCache[name] !== undefined) { setSrc(photoCache[name]); return; }
+    if (wikiCache[name] !== undefined) { setV(wikiCache[name]); return; }
     let dead = false;
     fetch('https://en.wikipedia.org/api/rest_v1/page/summary/' + encodeURIComponent(name.replace(/ /g, '_')))
       .then((r) => (r.ok ? r.json() : null))
-      .then((j) => { const ok = j && /cricket/i.test(j.description || '') && j.thumbnail && j.thumbnail.source; photoCache[name] = ok ? j.thumbnail.source : null; if (!dead) setSrc(photoCache[name]); })
-      .catch(() => { photoCache[name] = null; });
+      .then((j) => { const ok = j && /cricket/i.test(j.description || ''); wikiCache[name] = ok ? { src: j.thumbnail && j.thumbnail.source, extract: j.extract } : {}; if (!dead) setV(wikiCache[name]); })
+      .catch(() => { wikiCache[name] = {}; });
     return () => { dead = true; };
   }, [name]);
+  return v || {};
+}
+function Photo({ name, size = 96 }) {
+  const { src } = useWiki(name);
   const initials = name.split(' ').map((w) => w[0]).slice(0, 2).join('');
   const box = { width: size, height: size };
   return src ? <img src={src} alt={name} referrerPolicy="no-referrer" style={box} className="shrink-0 rounded-2xl bg-white/10 object-cover object-top" />
     : <div style={box} className="grid shrink-0 place-items-center rounded-2xl bg-white/10 font-bold text-amber-300">{initials}</div>;
 }
+function PlayerInfo({ p, rp, room }) {
+  const info = useWiki(p.name);
+  const age = (() => { const m = (p.dob || '').split('/'); if (m.length !== 3) return null; return Math.floor((Date.now() - new Date(+m[2], +m[1] - 1, +m[0])) / 31557600000); })();
+  const chip = (t, c) => <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${c}`}>{t}</span>;
+  return (<div className="space-y-1.5">
+    <div className="flex flex-wrap gap-1.5">
+      {chip(p.role.toUpperCase(), 'bg-amber-400 text-black')}
+      {p.overseas ? chip('✈ OVERSEAS · ' + p.country, 'bg-sky-400 text-black') : chip('🇮🇳 INDIAN', 'bg-green-500 text-black')}
+      {p.capped === 'Capped' ? chip('CAPPED', 'bg-purple-500 text-white') : chip('UNCAPPED', 'bg-slate-500 text-white')}
+      {p.retained && chip('⭐ RETAINED STAR', 'bg-yellow-300 text-black')}
+      {room.accel_done && chip('⚡ ACCELERATED ROUND', 'bg-red-500 text-white')}
+    </div>
+    <p className="text-xs text-slate-300">{rp.blk_label || setLabel(p.set_code)}</p>
+    <p className="text-sm text-slate-300">{age != null && `Age ${age} · `}Bats {p.bat === 'RHB' ? 'right-handed' : p.bat === 'LHB' ? 'left-handed' : '—'}{p.bowl ? ` · Bowls ${p.bowl.toLowerCase()}` : ' · Does not bowl (per list)'}</p>
+    <p className="text-xs text-slate-400">{p.retained ? `Retained by ${p.ipl_team_2025} · custom base ${cr(rp.base_lakh)} (not official)` : `IPL 2025 team: ${p.ipl_team_2025 || 'none'}${p.ipl_matches != null ? ` (${p.ipl_matches} matches)` : ''} · Base ${cr(rp.base_lakh)} (official reserve price)`}</p>
+    {info.extract && <p className="text-xs text-slate-500">{info.extract.slice(0, 230)}{info.extract.length > 230 ? '…' : ''} <span className="italic">(Wikipedia)</span></p>}
+    <a href={`https://www.espncricinfo.com/search?q=${encodeURIComponent(p.name)}`} target="_blank" rel="noreferrer" className="text-xs text-amber-400 underline">Career stats on ESPNcricinfo ↗</a>
+  </div>);
+}
+
+const TARGETS = { Batter: 5, Wicketkeeper: 2, 'All-rounder': 4, Bowler: 6 };   // suggested balanced minimum (17 of the 18 minimum squad)
+function Needs({ room, mine, rps, P, cur }) {
+  const sq = rps.filter((r) => r.sold_to === mine.id);
+  const have = (role) => sq.filter((r) => P[r.player_id]?.role === role).length;
+  const left = room.purse_lakh - mine.spent_lakh;
+  const toMin = Math.max(room.min_squad - mine.squad_count, 0);
+  const maxBid = Math.max(left - Math.max(room.min_squad - mine.squad_count - 1, 0) * 30, 0);
+  const curP = cur ? P[cur.player_id] : null;
+  const osLeft = Math.max(room.max_overseas - mine.os_count, 0);
+  let hint = null;
+  if (curP) hint = (curP.overseas && osLeft === 0) ? ['⚠ You have no overseas slot left for this player', 'bg-red-500/20'] : Math.max(TARGETS[curP.role] - have(curP.role), 0) > 0 ? ['🎯 This player fills a need in your squad', 'bg-green-600/25'] : ['This role is already covered in your squad', 'bg-white/10'];
+  return (<div className="card space-y-2"><h3 className="font-semibold">What my team needs</h3>
+    <div className="grid grid-cols-2 gap-2 text-center text-xs">{ROLES.map(([role, label]) => { const need = Math.max(TARGETS[role] - have(role), 0); return <div key={role} className={`rounded-lg p-2 ${need ? 'bg-amber-400/15' : 'bg-green-600/20'} ${curP && curP.role === role ? 'ring-1 ring-amber-300' : ''}`}>
+      <div className="text-slate-300">{label}</div><div className="text-base font-bold">{have(role)}/{TARGETS[role]}</div><div>{need ? `need ${need} more` : '✅ covered'}</div></div>; })}</div>
+    <p className="text-xs text-slate-400">Suggested balance only — you can build any squad you like.</p>
+    <p className="text-xs text-slate-300">✈ Overseas slots left: <b>{osLeft}</b> of {room.max_overseas} · Squad <b>{mine.squad_count}</b> (min {room.min_squad}, max {room.max_squad})</p>
+    <p className="text-xs text-slate-300">💰 Purse <b>{cr(left)}</b> · {toMin} more player{toMin === 1 ? '' : 's'} needed for the minimum squad<br />Safe average per remaining slot: <b>{toMin ? cr(Math.round(left / toMin)) : '—'}</b><br />Most you can bid on one player now: <b>{cr(maxBid)}</b> <span className="text-slate-500">(keeps ₹30 L per slot for the minimum squad)</span></p>
+    {hint && <p className={`rounded p-1 text-center text-xs ${hint[1]}`}>{hint[0]}</p>}</div>);
+}
+
+function Watchlist({ watch, rps, P, autos, act }) {
+  const items = watch.map((w) => ({ w, p: P[w.player_id], rp: rps.find((r) => r.player_id === w.player_id) })).filter((x) => x.p && x.rp).sort((a, b) => a.rp.seq - b.rp.seq);
+  const status = (rp) => rp.status === 'live' ? ['ON NOW', 'text-yellow-300'] : rp.status === 'pending' ? (() => { const n = rps.filter((x) => x.status === 'pending' && x.seq < rp.seq).length; return [n === 0 ? 'NEXT UP' : `${n} players before`, 'text-amber-300']; })() : rp.status === 'sold' ? ['SOLD', 'text-green-400'] : ['UNSOLD', 'text-red-400'];
+  const setAuto = (rp) => { const a = autos.find((x) => x.rp_id === rp.id); const v = prompt('Auto-bid up to how many ₹ Crore? (0 or empty = cancel)', a ? a.max_lakh / 100 : ''); if (v === null) return; const l = Math.round(parseFloat(v) * 100); act('set_auto_bid', { p_rp: rp.id, p_max: l > 0 ? l : 0 }); };
+  return (<div className="card"><h3 className="mb-1 font-semibold">⭐ My watchlist</h3>
+    {items.length === 0 ? <p className="text-xs text-slate-400">Tap ☆ next to a player to add them. They are highlighted when they come up.</p> :
+      <ul className="max-h-56 divide-y divide-white/10 overflow-y-auto text-sm">{items.map(({ w, p, rp }) => { const [st, col] = status(rp); const a = autos.find((x) => x.rp_id === rp.id); return <li key={w.player_id} className="flex items-center justify-between gap-2 py-1">
+        <span className="min-w-0 flex-1 truncate">{p.name} <span className={`text-xs ${col}`}>{st}</span></span>
+        {(rp.status === 'pending' || rp.status === 'live') && <button onClick={() => setAuto(rp)} className="rounded bg-white/10 px-2 py-0.5 text-xs">{a ? `🤖 ≤ ${cr(a.max_lakh)}` : '🤖 Auto'}</button>}
+        <button onClick={() => act('toggle_watch', { p_player: w.player_id })} className="text-xs text-slate-400" title="Remove">✕</button></li>; })}</ul>}</div>);
+}
+
+function AutoBid({ rp, autos, act }) {
+  const a = autos.find((x) => x.rp_id === rp.id);
+  const [v, setV] = useState('');
+  return (<div className="mt-3 rounded-xl bg-black/20 p-3 text-sm">
+    {a ? <div className="flex flex-wrap items-center gap-2"><span>🤖 Auto-bid is on, up to <b>{cr(a.max_lakh)}</b></span><button className="btn bg-white/10 py-1 text-xs" onClick={() => act('set_auto_bid', { p_rp: rp.id, p_max: 0 })}>Cancel</button></div>
+      : <div className="flex flex-wrap items-center gap-2"><span>Auto-bid up to ₹</span>
+        <input type="number" step="0.05" min="0" className="inp w-24" value={v} onChange={(e) => setV(e.target.value)} placeholder="Cr" /><span>Cr</span>
+        <button className="btn bg-amber-400 py-1 text-black" onClick={() => { const l = Math.round(parseFloat(v) * 100); if (l > 0) { act('set_auto_bid', { p_rp: rp.id, p_max: l }); setV(''); } }}>Set</button>
+        <span className="text-xs text-slate-400">The app bids for you, one step at a time, up to your limit. Private.</span></div>}
+  </div>);
+}
+
+function AccelPick({ room, fr, rps, P, mine, isHost, act }) {
+  const unsold = rps.filter((r) => r.status === 'unsold');
+  const [sel, setSel] = useState([]);
+  useEffect(() => {
+    if (!mine) return;
+    sb.from('accel_picks').select('rp_id').eq('franchise_id', mine.id).then(({ data }) => { if (data && data.length) setSel(data.map((x) => x.rp_id)); });
+  }, [mine?.id]);
+  const toggle = (id) => setSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : s.length >= 10 ? s : [...s, id]));
+  const ready = fr.filter((f) => f.accel_ready).length;
+  return (<div className="space-y-4">
+    <div className="card"><h2 className="text-xl font-bold">⚡ Accelerated auction — pick your players</h2>
+      <p className="mt-1 text-sm text-slate-300">The main round is over. Each franchise picks <b>5–10</b> unsold players it wants. Only picked players are auctioned again, with a <b>{room.accel_secs || 7}-second</b> timer. Your picks are private. Bots have already picked.</p>
+      <div className="mt-2 flex flex-wrap gap-2 text-xs">{fr.map((f) => <span key={f.id} className={`rounded-full px-2 py-1 ${f.accel_ready ? 'bg-green-600/40' : 'bg-white/10'}`}>{f.accel_ready ? '✅' : '⏳'} {f.team}{f.is_bot ? ' 🤖' : ''}</span>)}</div>
+      {isHost && <button className="btn mt-3 bg-green-500 text-black" onClick={() => act('host_start_accel')}>Start accelerated auction ({ready}/{fr.length} ready)</button>}</div>
+    {mine ? <div className="card space-y-3">
+      <div className="flex flex-wrap items-center gap-3"><b>{sel.length}/10 selected</b><span className="text-xs text-slate-400">(minimum 5)</span>
+        <button className="btn bg-amber-400 text-black" onClick={() => act('submit_picks', { p_rps: sel })}>{mine.accel_ready ? 'Update my picks' : 'Submit my picks'}</button>
+        {mine.accel_ready && <span className="text-sm text-green-400">✅ Submitted — you can change them until the host starts.</span>}</div>
+      {ROLES.map(([role, label]) => { const g = unsold.filter((r) => P[r.player_id]?.role === role); return g.length ? <div key={role}>
+        <div className="border-b border-white/20 pb-1 text-xs font-semibold uppercase tracking-wide text-amber-300">{label} ({g.length})</div>
+        <div className="grid gap-x-4 sm:grid-cols-2">{g.map((r) => { const p = P[r.player_id]; return <label key={r.id} className="flex cursor-pointer items-center gap-2 py-1 text-sm">
+          <input type="checkbox" checked={sel.includes(r.id)} onChange={() => toggle(r.id)} /><span className="flex-1">{p?.name} <span className="text-slate-400">{p?.overseas ? '✈ ' : ''}{p?.country}</span></span><span>{cr(r.base_lakh)}</span></label>; })}</div></div> : null; })}
+    </div> : <p className="card">Waiting for franchises to submit their picks…</p>}
+  </div>);
+}
 const ROLES = [['Batter', 'Batters'], ['Wicketkeeper', 'Wicketkeepers'], ['All-rounder', 'All-rounders'], ['Bowler', 'Bowlers']];
-function Upcoming({ rps, P, cur, isHost, act }) {
+function Upcoming({ rps, P, cur, isHost, act, watchSet, mine }) {
   const [role, setRole] = useState(null);
   const active = role || P[cur?.player_id]?.role || 'Batter';
   const pend = rps.filter((x) => x.status === 'pending' || x.status === 'live');
@@ -31,7 +125,7 @@ function Upcoming({ rps, P, cur, isHost, act }) {
   const list = by(active).slice(0, 15);
   return (<div className="card"><h3 className="mb-2 font-semibold">Coming up by category <span className="text-xs font-normal text-slate-400">(remaining/total)</span></h3>
     <div className="mb-2 flex flex-wrap gap-1">{ROLES.map(([r, l]) => <button key={r} onClick={() => setRole(r)} className={`rounded-full px-2 py-1 text-xs ${active === r ? 'bg-amber-400 text-black' : 'bg-white/10'}`}>{l} {by(r).length}/{total(r)}</button>)}</div>
-    <ul className="max-h-56 divide-y divide-white/10 overflow-y-auto text-sm">{list.map((x) => { const p = P[x.player_id]; return <li key={x.id} className="flex justify-between py-1"><span>{p?.name} <span className="text-slate-400">{p?.country}</span></span><span className="flex items-center gap-2">{cr(x.base_lakh)}{isHost && x.status === 'pending' && <button title="Bots sit out this player" onClick={() => act('host_bots_skip', { p_rp: x.id, p_skip: !x.bots_skip })} className={`rounded px-1 text-xs ${x.bots_skip ? 'bg-red-500/70' : 'bg-white/10'}`}>{x.bots_skip ? '🚫🤖' : '🤖'}</button>}</span></li>; })}
+    <ul className="max-h-56 divide-y divide-white/10 overflow-y-auto text-sm">{list.map((x) => { const p = P[x.player_id]; return <li key={x.id} className={`flex justify-between py-1 ${watchSet && watchSet.has(x.player_id) ? 'bg-yellow-300/10' : ''}`}><span>{mine && <button title="Watchlist" onClick={() => act('toggle_watch', { p_player: x.player_id })} className="mr-1 text-yellow-300">{watchSet && watchSet.has(x.player_id) ? '★' : '☆'}</button>}{p?.name} <span className="text-slate-400">{p?.country}</span></span><span className="flex items-center gap-2">{cr(x.base_lakh)}{isHost && x.status === 'pending' && <button title="Bots sit out this player" onClick={() => act('host_bots_skip', { p_rp: x.id, p_skip: !x.bots_skip })} className={`rounded px-1 text-xs ${x.bots_skip ? 'bg-red-500/70' : 'bg-white/10'}`}>{x.bots_skip ? '🚫🤖' : '🤖'}</button>}</span></li>; })}
       {by(active).length > 15 && <li className="py-1 text-slate-400">+{by(active).length - 15} more…</li>}</ul></div>);
 }
 const TABS = ['Live', 'Results Table', 'My Franchise', 'All Teams', 'Final'];
@@ -56,6 +150,9 @@ function thud(when = 0, v = 0.6) {
 const sfx = {
   beep: () => tone(880, 0.1, 'square', 0.06), beepHi: () => tone(1320, 0.25, 'square', 0.08), bid: () => tone(520, 0.06, 'triangle', 0.07),
   sold: () => { thud(0); thud(0.22); tone(523, 0.18, 'triangle', 0.15, 0.5); tone(659, 0.18, 'triangle', 0.15, 0.65); tone(784, 0.4, 'triangle', 0.15, 0.8); },
+  once: () => thud(0, 0.35),
+  twice: () => { thud(0, 0.4); thud(0.28, 0.4); },
+  final: () => { thud(0, 0.45); thud(0.22, 0.45); thud(0.44, 0.5); tone(1000, 0.3, 'square', 0.06, 0.62); },
   unsold: () => { tone(300, 0.25, 'sawtooth', 0.08); tone(220, 0.45, 'sawtooth', 0.08, 0.22); },
 };
 
@@ -87,18 +184,19 @@ function PinBadge({ pin }) {
 export default function Room({ params }) {
   const code = params.code.toUpperCase();
   const [me, setMe] = useState(null), [info, setInfo] = useState(null), [room, setRoom] = useState(null);
+  const [autos, setAutos] = useState([]), [watch, setWatch] = useState([]);
   const [fr, setFr] = useState([]), [rps, setRps] = useState([]), [bids, setBids] = useState([]), [P, setP] = useState({});
-  const [pin, setPin] = useState(null), [lu, setLu] = useState([]);
+  const [pin, setPin] = useState(null);
   const [tab, setTab] = useState('Live'), [msg, setMsg] = useState(''), [now, setNow] = useState(Date.now()), [err, setErr] = useState('');
 
   const load = useCallback(async (id) => {
-    const [r, f, p, b, l] = await Promise.all([
+    const [r, f, p, b, au, wa] = await Promise.all([
       sb.from('rooms').select('*').eq('id', id).maybeSingle(),
       sb.from('franchises').select('*').eq('room_id', id).order('created_at'),
       sb.from('room_players').select('*').eq('room_id', id).order('seq').limit(1000),
       sb.from('bids').select('*').eq('room_id', id).order('id', { ascending: false }).limit(300),
-      sb.from('lineups').select('*').eq('room_id', id)]);   // empty (not an error for the page) until update_lineups.sql has been run
-    setRoom(r.data); setFr(f.data || []); setRps(p.data || []); setBids(b.data || []); setLu(l.data || []);
+      sb.from('auto_bids').select('*').eq('room_id', id), sb.from('watchlist').select('*').eq('room_id', id)]);   // RLS: only your own rows
+    setRoom(r.data); setFr(f.data || []); setRps(p.data || []); setBids(b.data || []); setAutos(au.data || []); setWatch(wa.data || []);
   }, []);
 
   useEffect(() => {
@@ -114,7 +212,7 @@ export default function Room({ params }) {
         setInfo(i); await load(i.id);
         if (dead) return;
         ch = sb.channel('room-' + i.id + '-' + Math.random().toString(36).slice(2));
-        ['rooms', 'franchises', 'room_players', 'bids', 'lineups'].forEach((t) => ch.on('postgres_changes',
+        ['rooms', 'franchises', 'room_players', 'bids'].forEach((t) => ch.on('postgres_changes',
           { event: '*', schema: 'public', table: t, filter: t === 'rooms' ? `id=eq.${i.id}` : `room_id=eq.${i.id}` }, () => load(i.id)));
         ch.subscribe();
         iv = setInterval(() => load(i.id), 5000); // fallback poll: also restores state after reconnect
@@ -165,6 +263,17 @@ export default function Room({ params }) {
     }
   }, [rps, room]);
 
+  useEffect(() => {   // keep the phone screen awake while the auction runs (bots and timers need an open screen)
+    const on = room && (room.status === 'live' || room.status === 'paused' || room.status === 'accel_pick');
+    if (!on || !('wakeLock' in navigator)) return;
+    let lock = null, dead = false;
+    const get = () => navigator.wakeLock.request('screen').then((l) => { if (dead) l.release(); else lock = l; }).catch(() => {});
+    get();
+    const vis = () => { if (document.visibilityState === 'visible') get(); };
+    document.addEventListener('visibilitychange', vis);
+    return () => { dead = true; document.removeEventListener('visibilitychange', vis); if (lock) lock.release().catch(() => {}); };
+  }, [room?.status === 'live' || room?.status === 'paused' || room?.status === 'accel_pick']);
+
   // Drives the AI bots: the server decides whether a bot acts, so extra calls are harmless.
   useEffect(() => {
     if (!room || room.status !== 'live' || !room.fill_bots) return;
@@ -188,21 +297,19 @@ export default function Room({ params }) {
   return (<div className="space-y-4">
     {moment && <SoldOverlay m={moment} P={P} FR={FR} onClose={() => setMoment(null)} />}
     <div className="flex flex-wrap items-center gap-2">
-      <h1 className="text-xl font-bold mr-auto">{room.name} <span className="text-sm text-slate-400">#{room.code} · {room.status.toUpperCase()}</span></h1>
+      <h1 className="text-xl font-bold mr-auto">{room.name} <span className="text-sm text-slate-400">#{room.code} · {room.status.replace('_', ' ').toUpperCase()}</span></h1>
       <button onClick={toggleSound} className="btn bg-white/10 text-sm">{sound ? '🔊 Sound ON' : '🔇 Sound OFF'}</button>
       {room.status !== 'lobby' && <span className="rounded-full bg-white/10 px-2 py-1 text-xs">🤖 Bots {room.fill_bots ? 'ON' : 'OFF'}</span>}
       {mine && pin && <PinBadge pin={pin} />}
-      {[...TABS, 'Playing XI'].map((t) => <button key={t} onClick={() => setTab(t)} className={`btn text-sm ${tab === t ? 'bg-amber-400 text-black' : 'bg-white/10'}`}>{t}</button>)}
+      {TABS.map((t) => <button key={t} onClick={() => setTab(t)} className={`btn text-sm ${tab === t ? 'bg-amber-400 text-black' : 'bg-white/10'}`}>{t}</button>)}
     </div>
     {msg && <p className="rounded-lg bg-red-500/20 p-2 text-sm">{msg}</p>}
-    {room.status === 'done' && mine && tab !== 'Playing XI' && <button onClick={() => setTab('Playing XI')} className="w-full rounded-lg bg-amber-400/20 p-3 text-left text-sm font-semibold text-amber-300">🏏 The auction is over! {lu.find((l) => l.franchise_id === mine.id)?.final ? 'Your Playing XI is final ✅ (tap to view)' : 'Finalise your Playing XI, captain, vice-captain and backups →'}</button>}
     {!mine && <p className="rounded-lg bg-white/10 p-2 text-sm">You are watching as a spectator. Are you a player? <a className="text-amber-400 underline" href={`/rejoin?code=${code}`}>Rejoin with your PIN</a></p>}
-    {tab === 'Live' && <Live {...{ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act, lu, setTab }} />}
+    {tab === 'Live' && (room.status === 'accel_pick' ? <AccelPick {...{ room, fr, rps, P, mine, isHost, act }} /> : <Live {...{ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act, autos, watch, play }} />)}
     {tab === 'Results Table' && <Table {...{ rps, P, FR, fr, isHost, act, room }} />}
     {tab === 'My Franchise' && (mine ? <Squad f={mine} room={room} rps={rps} P={P} /> : <p className="card">You are watching as a spectator.</p>)}
     {tab === 'All Teams' && <div className="grid gap-4 md:grid-cols-2">{fr.map((f) => <Squad key={f.id} f={f} room={room} rps={rps} P={P} />)}</div>}
     {tab === 'Final' && <Final {...{ rps, P, FR, fr, room }} />}
-    {tab === 'Playing XI' && <PlayingXI {...{ room, mine, rps, P, fr, lu, load }} />}
   </div>);
 }
 
@@ -228,11 +335,25 @@ function Lobby({ room, fr, isHost, act, link, msg, mine, pin }) {
       {msg && <p className="text-sm text-red-400">{msg}</p>}</div>}</div>);
 }
 
-function Live({ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act, lu, setTab }) {
+function Live({ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act, autos, watch, play }) {
+  const watchSet = new Set(watch.map((w) => w.player_id));
   const p = cur && P[cur.player_id];
   const recent = [...rps].filter((x) => x.sold_at).sort((a, b) => new Date(b.sold_at) - new Date(a.sold_at)).slice(0, 6);
   const last = recent[0];
   const next = !cur ? 0 : room.cur_bidder ? room.cur_bid + inc(room.cur_bid) : cur.base_lakh;
+  const secs = Math.ceil(left / 1000), tot = room.timer_secs || 20;
+  let call = null;   // "going once / twice" call as the timer runs down
+  if (cur && room.status === 'live' && left > 0) {
+    const long = tot >= 15;   // 20 s timer: once <=6s, twice <=4s, final <=2s; 7 s accelerated timer: 4 / 3 / 2
+    const stage = secs <= 2 ? 3 : secs <= (long ? 4 : 3) ? 2 : secs <= (long ? 6 : 4) ? 1 : 0;
+    if (stage) call = room.cur_bidder ? ['', 'Going once…', 'Going twice…', 'FINAL CALL…'][stage] : 'Any bids?';
+  }
+  const lastCall = useRef(null);
+  useEffect(() => {   // sound for the calls (only when someone has bid)
+    if (call === lastCall.current) return;
+    lastCall.current = call;
+    if (call === 'Going once…') play('once'); else if (call === 'Going twice…') play('twice'); else if (call === 'FINAL CALL…') play('final');
+  }, [call]);
   const done = rps.filter((x) => x.status === 'sold' || x.status === 'unsold').length;
   const total = rps.length, sold = rps.filter((x) => x.status === 'sold').length;
   const myBids = bids.filter((b) => cur && b.rp_id === cur.id);
@@ -240,21 +361,24 @@ function Live({ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act, lu, se
     <div className="lg:col-span-2 space-y-4">
       {last && <div key={last.id} className="pop flex items-center justify-center gap-3 rounded-xl p-3 text-center font-bold" style={{ background: last.status === 'sold' ? '#16a34a55' : '#dc262655' }}><Photo name={P[last.player_id]?.name || '?'} size={56} />
         {last.status === 'sold' ? `🔨 SOLD! ${P[last.player_id]?.name} → ${FR[last.sold_to]?.team} for ${cr(last.sold_lakh)}` : `❌ UNSOLD: ${P[last.player_id]?.name}`}</div>}
-      {p ? <div className="card pop" key={cur.id}>
+      {p ? <div className={`card pop ${watchSet.has(p.id) ? 'ring-2 ring-yellow-300' : ''}`} key={cur.id}>
+        {watchSet.has(p.id) && <div className="mb-2 rounded-lg bg-yellow-300/20 p-1 text-center text-sm font-bold text-yellow-200">⭐ On your watchlist</div>}
         <div className="flex flex-wrap items-center gap-4">
           <Photo name={p.name} />
-          <div className="flex-1"><h2 className="text-3xl font-extrabold">{p.name}</h2>
-            <p className="text-slate-300"><span className="mr-2 rounded bg-amber-400 px-2 py-0.5 text-xs font-bold text-black">{p.role.toUpperCase()}</span>{p.country} · {p.capped} · {p.bat}{p.bowl ? ` · ${p.bowl}` : ''}</p>
-            <p className="text-xs text-slate-400">{cur.block_label || setLabel(p.set_code)} · {p.retained ? `Retained by ${p.ipl_team_2025} · custom base ${cr(cur.base_lakh)} (not official)` : `IPL 2025: ${p.ipl_team_2025 || '—'} · Base ${cr(cur.base_lakh)} (official reserve price)`}</p></div>
+          <div className="flex-1"><h2 className="text-3xl font-extrabold">{p.name}{mine && <button title="Add to watchlist" onClick={() => act('toggle_watch', { p_player: p.id })} className="ml-2 text-3xl text-yellow-300">{watchSet.has(p.id) ? '★' : '☆'}</button>}</h2>
+            <PlayerInfo p={p} rp={cur} room={room} /></div>
           <div className={`text-5xl font-black tabular-nums ${left < 5000 ? 'text-red-400' : 'text-amber-400'}`}>{Math.ceil(left / 1000)}s</div></div>
+        {call && <div key={call} className="pop mt-3 rounded-xl bg-amber-400/15 p-2 text-center text-xl font-extrabold text-amber-300">🔨 {call}</div>}
         <div className="mt-4 grid grid-cols-2 gap-3 text-center">
-          <div className="rounded-xl bg-black/30 p-3"><div className="text-xs text-slate-400">CURRENT BID</div><div className="text-3xl font-bold">{room.cur_bidder ? cr(room.cur_bid) : 'No bids'}</div></div>
+          <div className="rounded-xl bg-black/30 p-3"><div className="text-xs text-slate-400">CURRENT BID</div><div className="text-3xl font-bold">{room.cur_bidder ? cr(room.cur_bid) : 'No bids'}</div><div className="mt-1 text-xs text-slate-400">{room.cur_bidder ? `Next bid ${cr(next)} (+${cr(inc(room.cur_bid))})` : `Opens at ${cr(next)} (base price)`}</div></div>
           <div className="rounded-xl bg-black/30 p-3" style={{ borderBottom: `4px solid ${FR[room.cur_bidder]?.color || 'transparent'}` }}><div className="text-xs text-slate-400">HIGHEST BIDDER</div><div className="flex items-center justify-center gap-2 text-xl font-bold">{room.cur_bidder && <Logo team={FR[room.cur_bidder]?.team} size={32} />}{FR[room.cur_bidder]?.team || '—'}</div></div></div>
         {mine && room.status === 'live' && <div className="mt-4 flex gap-3">
           <button disabled={room.cur_bidder === mine.id} onClick={() => act('bid', { p_amount: next })} className="btn flex-1 bg-amber-400 py-4 text-xl text-black">BID {cr(next)}</button>
           <button onClick={() => act('pass')} className="btn bg-white/10 py-4">PASS</button></div>}
+        {mine && room.status === 'live' && <AutoBid rp={cur} autos={autos} act={act} />}
+        <p className="mt-2 text-center text-xs text-slate-500">Bid steps: +5 L below ₹1 Cr · +10 L to ₹2 Cr · +20 L to ₹5 Cr · +25 L above</p>
         {room.status === 'paused' && <p className="mt-3 text-center text-amber-300">⏸ Auction paused by host</p>}
-      </div> : <div className="card text-center text-xl">{room.status === 'review' ? 'First round finished — host can re-auction unsold players.' : room.status === 'done' ? 'Auction complete! Finalise your Playing XI in the Playing XI tab, and see the Final tab for the summary.' : 'Waiting…'}</div>}
+      </div> : <div className="card text-center text-xl">{room.status === 'review' ? 'First round finished — host can re-auction unsold players.' : room.status === 'done' ? 'Auction complete! See the Final tab.' : 'Waiting…'}</div>}
       <div className="card"><h3 className="font-semibold mb-2">Recent results</h3>
         {recent.length === 0 ? <p className="text-sm text-slate-400">Nothing sold yet</p> : recent.map((r) => <div key={r.id} className="flex items-center gap-2 py-1 text-sm">
           <Photo name={P[r.player_id]?.name || '?'} size={32} /><span className="flex-1">{P[r.player_id]?.name}</span>
@@ -275,8 +399,9 @@ function Live({ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act, lu, se
     <div className="space-y-4"><div className="card"><h3 className="font-semibold">Progress</h3>
       <p className="text-sm">{done}/{total} auctioned · {sold} sold · {rps.filter((x) => x.status === 'unsold').length} unsold · {rps.filter((x) => x.status === 'pending').length} remaining</p>
       <div className="mt-2 h-2 rounded bg-white/10"><div className="h-2 rounded bg-amber-400" style={{ width: `${(done / Math.max(total, 1)) * 100}%` }} /></div></div>
-      {mine && <MiniXI {...{ mine, rps, P, lu, setTab, curP: p }} />}
-      <Upcoming rps={rps} P={P} cur={cur} isHost={isHost} act={act} />
+      {mine && <Needs room={room} mine={mine} rps={rps} P={P} cur={cur} />}
+      {mine && <Watchlist watch={watch} rps={rps} P={P} autos={autos} act={act} />}
+      <Upcoming rps={rps} P={P} cur={cur} isHost={isHost} act={act} watchSet={watchSet} mine={mine} />
       <div className="card space-y-2"><h3 className="font-semibold">Teams</h3>{fr.map((f) => <div key={f.id} className="flex items-center gap-2 text-sm">
         <Logo team={f.team} size={22} /><span className="flex-1 truncate">{f.team}{f.is_bot && ' 🤖'}</span>
         <span>{cr(room.purse_lakh - f.spent_lakh)}</span><span className="text-slate-400">{f.squad_count}p · {f.os_count}/{room.max_overseas}os</span></div>)}</div></div>
@@ -328,201 +453,90 @@ function Squad({ f, room, rps, P }) {
       <ul className="divide-y divide-white/10 text-sm">{g.map((x) => <li key={x.id} className="flex justify-between py-1"><span>{x.p?.name} <span className="text-slate-400">{x.p?.country}</span></span><b>{cr(x.sold_lakh)}</b></li>)}</ul></div> : null; })}</div>);
 }
 
-// ---------- Playing XI + backups (available after the auction is over) ----------
-const SLOT_NAMES = ['Opener', 'Opener', 'No. 3', 'No. 4', 'No. 5', 'No. 6', 'No. 7', 'No. 8', 'No. 9', 'No. 10', 'No. 11'];
-const padSlots = (arr) => Array.from({ length: 11 }, (_, i) => ({ p: arr?.[i]?.p ?? null, b: [...(arr?.[i]?.b || [])] }));
-const isBowlOpt = (p) => p.role === 'Bowler' || p.role === 'All-rounder';
-
-// Suggests a balanced XI: 1 keeper, max 4 overseas, 5+ bowling options, batting order = batters/keeper, all-rounders, bowlers.
-function autoPick(sq) {
-  const pool = [...sq].sort((a, b) => b.sold_lakh - a.sold_lakh);
-  const xi = []; let os = 0;
-  const can = (x) => !x.p.overseas || os < 4;
-  const take = (x) => { xi.push(x); if (x.p.overseas) os++; pool.splice(pool.indexOf(x), 1); };
-  const wk = pool.find((x) => x.p.role === 'Wicketkeeper' && can(x)); if (wk) take(wk);
-  while (xi.length < 11 && pool.length) {
-    const cand = pool.filter(can); if (!cand.length) break;
-    const need = 5 - xi.filter((x) => isBowlOpt(x.p)).length;
-    take((need >= 11 - xi.length && cand.find((x) => isBowlOpt(x.p))) || cand[0]);
-  }
-  const rank = (x) => ({ Batter: 0, Wicketkeeper: 0, 'All-rounder': 1, Bowler: 2 }[x.p.role] ?? 1);
-  xi.sort((a, b) => rank(a) - rank(b) || b.sold_lakh - a.sold_lakh);
-  const used = new Set();
-  const slots = padSlots(xi.map((x) => {
-    const same = pool.filter((y) => y.p.role === x.p.role), pick = same.find((y) => !used.has(y.player_id)) || same[0];
-    if (pick) used.add(pick.player_id);
-    return { p: x.player_id, b: pick ? [pick.player_id] : [] };
-  }));
-  const byPrice = [...xi].sort((a, b) => b.sold_lakh - a.sold_lakh);
-  return { slots, cap: byPrice[0]?.player_id ?? null, vc: byPrice[1]?.player_id ?? null };
+// ---------- team strength (game estimates, NOT official ratings) ----------
+// Player rating comes from the player's base-price tier (+3 if capped). Team scores use the best players per area.
+const baseRating = (rp, p) => { const b = rp.base_lakh; const r = b >= 200 ? 90 : b >= 150 ? 80 : b >= 125 ? 75 : b >= 100 ? 70 : b >= 75 ? 62 : b >= 50 ? 52 : b >= 40 ? 46 : 40; return Math.min(99, r + (p.capped === 'Capped' ? 3 : 0)); };
+const EXPECT = [[40, 40], [46, 70], [52, 120], [62, 250], [70, 450], [80, 700], [90, 1200], [99, 1700]];   // rating -> typical price (lakh)
+const expectedPrice = (r) => { for (let i = 1; i < EXPECT.length; i++) if (r <= EXPECT[i][0]) { const [a, b] = [EXPECT[i - 1], EXPECT[i]]; return a[1] + (b[1] - a[1]) * (r - a[0]) / (b[0] - a[0]); } return EXPECT[EXPECT.length - 1][1]; };
+const avgTop = (arr, n, fill = 25) => { const t = [...arr].sort((a, b) => b - a).slice(0, n); while (t.length < n) t.push(fill); return t.reduce((a, b) => a + b, 0) / n; };
+function strength(sq, room) {
+  const by = (role) => sq.filter((x) => x.p.role === role).map((x) => x.r);
+  const bat = avgTop([...by('Batter'), ...by('Wicketkeeper'), ...by('All-rounder').map((r) => r * 0.9)], 6);
+  const bowl = avgTop([...by('Bowler'), ...by('All-rounder').map((r) => r * 0.85)], 5);
+  const ar = avgTop(by('All-rounder'), 3);
+  const keep = by('Wicketkeeper').length ? Math.max(...by('Wicketkeeper')) : 20;
+  let bal = 100;
+  Object.entries(TARGETS).forEach(([role, t]) => { bal -= Math.max(t - by(role).length, 0) * 8; });
+  bal = Math.max(0, bal - Math.max(room.min_squad - sq.length, 0) * 3);
+  const overall = bat * 0.30 + bowl * 0.30 + ar * 0.15 + keep * 0.10 + bal * 0.15;
+  const grade = overall >= 85 ? 'A+' : overall >= 78 ? 'A' : overall >= 70 ? 'B+' : overall >= 62 ? 'B' : overall >= 52 ? 'C' : 'D';
+  return { bat, bowl, ar, keep, bal, overall, grade };
 }
-
-// Fills the EMPTY slots of an XI (keeps what the user already picked) from the bench: right role for the batting position, max 4 overseas,
-// a keeper if there is none yet, and 5+ bowling options. Backups are left alone.
-const slotGroup = (i) => (i <= 5 ? ['Batter', 'Wicketkeeper'] : i <= 7 ? ['All-rounder'] : ['Bowler']);
-const slotHint = (i) => (i <= 5 ? 'batter / keeper' : i <= 7 ? 'all-rounder' : 'bowler');
-function autoFill(slots, sq) {
-  const out = slots.map((s) => ({ p: s.p, b: [...s.b] })), by = Object.fromEntries(sq.map((x) => [x.player_id, x]));
-  const used = new Set(out.map((s) => s.p).filter(Boolean));
-  let os = out.filter((s) => s.p && by[s.p]?.p.overseas).length;
-  const pool = sq.filter((x) => !used.has(x.player_id)).sort((a, b) => b.sold_lakh - a.sold_lakh);
-  const has = (fn) => out.some((s) => s.p && by[s.p] && fn(by[s.p].p));
-  for (let i = 0; i < 11; i++) {
-    if (out[i].p) continue;
-    const cand = pool.filter((x) => !x.p.overseas || os < 4); if (!cand.length) break;
-    const emptyLeft = out.slice(i).filter((s) => !s.p).length, needBowl = 5 - out.filter((s) => s.p && by[s.p] && isBowlOpt(by[s.p].p)).length;
-    const pick = (needBowl >= emptyLeft && cand.find((x) => isBowlOpt(x.p)))
-      || (!has((q) => q.role === 'Wicketkeeper') && i <= 5 && cand.find((x) => x.p.role === 'Wicketkeeper'))
-      || cand.find((x) => slotGroup(i).includes(x.p.role)) || cand[0];
-    out[i].p = pick.player_id; used.add(pick.player_id); pool.splice(pool.indexOf(pick), 1); if (pick.p.overseas) os++;
-    out.forEach((s) => { s.b = s.b.filter((id) => id !== pick.player_id); });
-  }
-  return out;
-}
-
-function LineupView({ f, row, P, rps }) {
-  const owned = new Set(rps.filter((r) => r.sold_to === f.id && r.status === 'sold').map((r) => r.player_id));
-  const slots = padSlots(row?.slots).map((s) => ({ p: owned.has(s.p) ? s.p : null, b: s.b.filter((id) => owned.has(id)) })), n = (id) => P[id];
-  return (<div className="card space-y-2" style={{ borderColor: f.color }}>
-    <h3 className="flex items-center gap-2 font-bold" style={{ color: f.color }}><Logo team={f.team} size={26} />{f.team} <span className="text-xs font-normal text-slate-400">— {f.owner}{f.is_bot && ' 🤖'}</span>
-      {row?.final && <span className="ml-auto rounded-full bg-green-500/20 px-2 py-0.5 text-xs text-green-300">FINAL ✅</span>}</h3>
-    {!row ? <p className="text-sm text-slate-400">{f.is_bot ? 'Bot teams do not set a Playing XI.' : 'Has not set a Playing XI.'}</p> :
-      <ul className="divide-y divide-white/10 text-sm">{slots.map((s, i) => s.p ? <li key={i} className="py-1">
-        <div className="flex justify-between"><span><span className="mr-2 text-xs text-slate-400">{i + 1}</span>{n(s.p)?.name}{n(s.p)?.overseas ? ' ✈' : ''}{row.captain === s.p && <b className="ml-1 text-amber-300">(C)</b>}{row.vice === s.p && <b className="ml-1 text-amber-300">(VC)</b>}</span><span className="text-xs text-slate-400">{n(s.p)?.role}</span></div>
-        {s.b.length > 0 && <div className="pl-5 text-xs text-slate-400">Backup: {s.b.map((id) => n(id)?.name).join(', ')}</div>}</li> : null)}</ul>}</div>);
-}
-
-// Compact "my XI so far" card on the Live tab, with a hint about whether the player on the block fills a gap.
-function MiniXI({ mine, rps, P, lu, setTab, curP }) {
-  const row = lu.find((l) => l.franchise_id === mine.id);
-  const owned = new Set(rps.filter((r) => r.sold_to === mine.id && r.status === 'sold').map((r) => r.player_id));
-  const slots = padSlots(row?.slots).map((s) => ({ p: owned.has(s.p) ? s.p : null }));
-  const filled = slots.filter((s) => s.p), n = filled.length, os = filled.filter((s) => P[s.p]?.overseas).length;
-  const wk = filled.some((s) => P[s.p]?.role === 'Wicketkeeper');
-  let hint = null;
-  if (curP && n < 11) {
-    const gap = slots.findIndex((s, i) => !s.p && slotGroup(i).includes(curP.role));
-    if (curP.overseas && os >= 4) hint = ['text-red-300', 'Your XI already has 4 overseas players'];
-    else if (curP.role === 'Wicketkeeper' && !wk) hint = ['text-green-300', 'Fills your wicketkeeper gap'];
-    else if (gap >= 0) hint = ['text-green-300', `Fits your empty slot ${gap + 1} (${SLOT_NAMES[gap]})`];
-    else hint = ['text-slate-400', 'Would go to your bench — no empty slot for this role'];
-  }
-  return (<div className="card"><div className="flex items-center justify-between"><h3 className="font-semibold">My Playing XI <span className="text-xs font-normal text-slate-400">{n}/11 · ✈ {os}/4</span></h3>
-    <button className="btn bg-white/10 px-2 py-1 text-xs" onClick={() => setTab('Playing XI')}>Edit</button></div>
-    {hint && <p className={`mt-1 text-xs ${hint[0]}`}>{hint[1]}</p>}
-    <ol className="mt-2 space-y-0.5 text-sm">{slots.map((s, i) => <li key={i} className="flex gap-2"><span className="w-5 text-slate-500">{i + 1}</span>
-      {s.p ? <span className="truncate">{P[s.p]?.name}{P[s.p]?.overseas ? ' ✈' : ''}{row?.captain === s.p && <b className="ml-1 text-amber-300">C</b>}{row?.vice === s.p && <b className="ml-1 text-amber-300">VC</b>}</span>
-        : <span className="text-slate-500">empty · {slotHint(i)}</span>}</li>)}</ol></div>);
-}
-
-function PlayingXI({ room, mine, rps, P, fr, lu, load }) {
-  const over = room.status === 'done', others = fr.filter((f) => f.id !== mine?.id);
-  return (<div className="space-y-4">
-    {mine ? <XIEditor {...{ room, mine, rps, P, lu, load }} /> : <p className="card text-sm">You are watching as a spectator.{!over && ' Teams’ Playing XIs are revealed when the auction ends.'}</p>}
-    <h3 className="text-lg font-bold">{mine ? 'Other teams’ Playing XIs' : 'Playing XIs'}</h3>
-    {over ? <div className="grid gap-4 md:grid-cols-2">{others.map((f) => <LineupView key={f.id} f={f} row={lu.find((l) => l.franchise_id === f.id)} P={P} rps={rps} />)}</div>
-      : <p className="card text-sm text-slate-400">🔒 Other teams’ lineups stay hidden until the auction is over, so nobody can read your plan.</p>}</div>);
-}
-
-function XIEditor({ room, mine, rps, P, lu, load }) {
-  const sq = useMemo(() => rps.filter((r) => r.sold_to === mine.id && r.status === 'sold').map((r) => ({ ...r, p: P[r.player_id] })).filter((x) => x.p).sort((a, b) => b.sold_lakh - a.sold_lakh), [rps, P, mine.id]);
-  const byId = useMemo(() => Object.fromEntries(sq.map((x) => [x.player_id, x])), [sq]);
-  const saved = lu.find((l) => l.franchise_id === mine.id), over = room.status === 'done';
-  const [slots, setSlots] = useState(() => padSlots([])), [cap, setCap] = useState(null), [vc, setVc] = useState(null), [dirty, setDirty] = useState(false), [note, setNote] = useState(''), [busy, setBusy] = useState(false);
-  const ver = useRef(0);
-  useEffect(() => {   // load the saved lineup (dropping anyone no longer owned, e.g. after an undone sale) unless the user is mid-edit
-    if (dirty) return;
-    const ok = (id) => id != null && byId[id];
-    setSlots(padSlots(saved?.slots).map((s) => ({ p: ok(s.p) ? s.p : null, b: s.b.filter(ok) })));
-    setCap(ok(saved?.captain) ? saved.captain : null); setVc(ok(saved?.vice) ? saved.vice : null);
-  }, [saved?.updated_at, saved?.final, sq.length]);
-
-  const locked = !!saved?.final && !dirty;   // a finalised XI is read-only until unlocked
-  const xi = slots.map((s) => s.p).filter(Boolean), xiP = xi.map((id) => byId[id]?.p).filter(Boolean);
-  const os = xiP.filter((p) => p.overseas).length, wks = xiP.filter((p) => p.role === 'Wicketkeeper').length, bowl = xiP.filter(isBowlOpt).length;
-  const bench = sq.filter((x) => !xi.includes(x.player_id));
-  const ready = xi.length === 11 && cap && vc;
-  const warn = [xi.length < 11 && `${11 - xi.length} spot(s) still empty`, wks === 0 && 'No wicketkeeper in the XI yet', bowl < 5 && `${bowl} bowling option(s) so far (bowlers + all-rounders) — usually you want 5+`, xi.length > 0 && !cap && 'No captain chosen yet', xi.length > 0 && !vc && 'No vice-captain chosen yet'].filter(Boolean);
-
-  const touch = () => { ver.current++; setDirty(true); setNote(''); };
-  const edit = (fn) => { setSlots((cur) => fn(cur.map((s) => ({ p: s.p, b: [...s.b] })))); touch(); };
-  const setStarter = (i, v) => {
-    const id = v ? +v : null, old = slots[i].p;
-    if (old && old !== id) { if (cap === old) setCap(null); if (vc === old) setVc(null); }
-    edit((c) => { c[i].p = id; if (id) c.forEach((s) => { s.b = s.b.filter((x) => x !== id); }); return c; });
-  };
-  const addBackup = (i, v) => { const id = +v; if (!id) return; edit((c) => { if (c[i].b.length < 3 && !c[i].b.includes(id) && c[i].p !== id) c[i].b.push(id); return c; }); };
-  const delBackup = (i, id) => edit((c) => { c[i].b = c[i].b.filter((x) => x !== id); return c; });
-  const fill = () => { setSlots(autoFill(slots, sq)); touch(); };
-  const auto = () => { const a = autoPick(sq); setSlots(a.slots); setCap(a.cap); setVc(a.vc); touch(); };
-  const clear = () => { setSlots(padSlots([])); setCap(null); setVc(null); touch(); };
-
-  const doSave = async (fin = false) => {
-    const v = ver.current; setBusy(true);
-    const { data, error } = await sb.rpc('save_lineup', { p_room: room.id, p_slots: slots.map((s) => ({ p: s.p, b: s.b })), p_captain: cap, p_vice: vc, p_final: fin });
-    setBusy(false);
-    if (error) return setNote('Could not save: ' + error.message + (/save_lineup/.test(error.message) ? ' (ask the host to run update_lineups.sql in Supabase)' : ''));
-    if (data !== 'ok') return setNote(data);
-    if (ver.current === v) setDirty(false);   // nothing changed while saving
-    setNote(fin ? 'Finalised ✅' : 'Saved ✓'); load(room.id);
-  };
-  useEffect(() => {   // autosave 1.2s after the last change, so the plan follows you through the auction
-    if (!dirty) return;
-    const t = setTimeout(() => doSave(false), 1200);
-    return () => clearTimeout(t);
-  }, [slots, cap, vc, dirty]);
-  const unlock = async () => { ver.current++; await doSave(false); };
-
-  const Chip = ({ ok, children }) => <span className={`rounded-full px-2 py-1 text-xs ${ok ? 'bg-green-500/20 text-green-300' : 'bg-white/10'}`}>{children}</span>;
-  const dis = locked;
-
-  return (<div className="card space-y-3" style={{ borderColor: mine.color }}>
-    <h3 className="flex flex-wrap items-center gap-2 text-xl font-bold" style={{ color: mine.color }}><Logo team={mine.team} size={32} />Your Playing XI <span className="text-sm font-normal text-slate-400">— {mine.team}</span>
-      {locked && <span className="rounded-full bg-green-500/20 px-2 py-0.5 text-xs font-semibold text-green-300">FINAL ✅</span>}</h3>
-    {sq.length === 0 ? <p className="text-sm text-slate-300">You have not bought anyone yet. As you win players they appear here — place them in your XI as you go.</p> : null}
-    <p className="text-xs text-slate-400">{over ? 'The auction is over — review your XI, set backups, captain and vice-captain, then press Finalise.' : 'Plan your XI while the auction runs: players you buy show up here and in the Live tab’s “My Playing XI” card. Changes save automatically. Empty slots show the role you still need.'}</p>
-    <div className="flex flex-wrap gap-2"><Chip ok={xi.length === 11}>{xi.length}/11 picked</Chip><Chip ok={os <= 4}>✈ {os}/4 overseas</Chip><Chip ok={wks > 0}>🧤 {wks} keeper</Chip><Chip ok={bowl >= 5}>🎯 {bowl} bowling options</Chip><Chip>Bench {bench.length}</Chip></div>
-    {warn.length > 0 && !locked && <ul className="list-disc pl-5 text-xs text-amber-300">{warn.map((w) => <li key={w}>{w}</li>)}</ul>}
-    <div className="flex flex-wrap items-center gap-2">
-      {!locked && <><button className="btn bg-white/10 text-sm" onClick={fill} disabled={sq.length === 0}>➕ Fill empty slots</button>
-        <button className="btn bg-white/10 text-sm" onClick={auto} disabled={sq.length === 0}>✨ Auto-pick all</button>
-        <button className="btn bg-white/10 text-sm" onClick={clear}>Clear</button></>}
-      {over && !locked && <button disabled={!ready || busy} className="btn bg-green-500 text-sm font-bold text-black" onClick={() => doSave(true)} title={ready ? '' : 'Needs 11 players, a captain and a vice-captain'}>✅ Finalise Playing XI</button>}
-      {locked && <button className="btn bg-white/10 text-sm" onClick={unlock}>🔓 Unlock to edit</button>}
-      {busy ? <span className="text-xs text-slate-400">Saving…</span> : dirty ? <span className="text-xs text-amber-300">Unsaved — saving automatically…</span> : null}
-      {note && !busy && <span className={`text-sm ${/^(Saved|Finalised)/.test(note) ? 'text-green-400' : 'text-red-400'}`}>{note}</span>}
-      {!dirty && !note && saved && <span className="text-xs text-slate-400">Saved {new Date(saved.updated_at).toLocaleString()}</span>}</div>
-    {over && !ready && !locked && <p className="text-xs text-slate-400">To finalise: fill all 11 slots and choose a captain (C) and vice-captain (VC).</p>}
-    <div className="space-y-2">{slots.map((s, i) => <div key={i} className="space-y-1 rounded-lg bg-black/30 p-2">
-      <div className="flex items-center gap-2">
-        <span className="w-16 shrink-0 text-xs text-slate-400">{i + 1} · {SLOT_NAMES[i]}</span>
-        <select disabled={dis} className="inp flex-1" value={s.p ?? ''} onChange={(e) => setStarter(i, e.target.value)}>
-          <option value="">— needs a {slotHint(i)} —</option>
-          {sq.filter((x) => x.player_id === s.p || !xi.includes(x.player_id)).map((x) => <option key={x.player_id} value={x.player_id} disabled={x.p.overseas && os >= 4 && !(s.p && byId[s.p]?.p.overseas)}>{x.p.name} · {x.p.role}{x.p.overseas ? ' ✈' : ''}</option>)}</select>
-        {s.p && <><button disabled={dis} title="Captain" onClick={() => { setCap(s.p); if (vc === s.p) setVc(null); touch(); }} className={`rounded px-2 py-1 text-xs font-bold ${cap === s.p ? 'bg-amber-400 text-black' : 'bg-white/10'}`}>C</button>
-          <button disabled={dis} title="Vice-captain" onClick={() => { setVc(s.p); if (cap === s.p) setCap(null); touch(); }} className={`rounded px-2 py-1 text-xs font-bold ${vc === s.p ? 'bg-amber-400 text-black' : 'bg-white/10'}`}>VC</button></>}</div>
-      {s.p && <div className="flex flex-wrap items-center gap-1 pl-[4.5rem] text-xs">
-        <span className="text-slate-400">Backup:</span>
-        {s.b.map((id) => <span key={id} className="rounded-full bg-white/10 px-2 py-1">{byId[id]?.p.name}{byId[id]?.p.overseas ? ' ✈' : ''} {!locked && <button onClick={() => delBackup(i, id)} className="ml-1 text-red-300" title="Remove backup">✕</button>}</span>)}
-        {!locked && s.b.length < 3 && <select className="inp w-auto py-1 text-xs" value="" onChange={(e) => addBackup(i, e.target.value)}>
-          <option value="">+ add backup</option>
-          {bench.filter((x) => !s.b.includes(x.player_id)).map((x) => <option key={x.player_id} value={x.player_id}>{x.p.name} · {x.p.role}{x.p.overseas ? ' ✈' : ''}</option>)}</select>}</div>}</div>)}</div>
-    <div><div className="mb-1 border-b border-white/20 pb-1 text-xs font-semibold uppercase tracking-wide text-amber-300">Bench — bought, not in the XI ({bench.length})</div>
-      {bench.length === 0 ? <p className="text-sm text-slate-400">{sq.length ? 'Everyone you bought is in the XI.' : 'Nobody yet.'}</p> : <ul className="divide-y divide-white/10 text-sm">{bench.map((x) => <li key={x.player_id} className="flex justify-between py-1"><span>{x.p.name}{x.p.overseas ? ' ✈' : ''}</span><span className="text-xs text-slate-400">{x.p.role}</span></li>)}</ul>}</div></div>);
-}
+const GCOL = { 'A+': 'text-green-400', A: 'text-green-300', 'B+': 'text-amber-300', B: 'text-amber-400', C: 'text-orange-400', D: 'text-red-400' };
+const Bar = ({ v, color }) => <div className="h-2 rounded bg-white/10"><div className="h-2 rounded" style={{ width: `${Math.min(100, Math.max(0, v))}%`, background: color }} /></div>;
+const METRICS = [['bat', 'Batting'], ['bowl', 'Bowling'], ['ar', 'All-rounders'], ['keep', 'Wicketkeeping'], ['bal', 'Squad balance']];
 
 function Final({ rps, P, FR, fr, room }) {
   const sold = rps.filter((r) => r.status === 'sold');
+  const teams = fr.map((f) => {
+    const sq = sold.filter((r) => r.sold_to === f.id).map((rp) => ({ rp, p: P[rp.player_id] })).filter((x) => x.p).map((x) => ({ ...x, r: baseRating(x.rp, x.p) }));
+    return { f, sq, st: strength(sq, room) };
+  }).sort((a, b) => b.st.overall - a.st.overall);
+  const deals = sold.map((rp) => { const p = P[rp.player_id]; if (!p) return null; const r = baseRating(rp, p); const e = expectedPrice(r); return { rp, p, r, e, save: e - rp.sold_lakh }; }).filter(Boolean);
+  const bestValue = [...deals].filter((d) => d.r >= 62).sort((a, b) => b.save - a.save).slice(0, 3);
+  const overpaid = [...deals].sort((a, b) => a.save - b.save).slice(0, 3);
   const top = [...sold].sort((a, b) => b.sold_lakh - a.sold_lakh)[0];
-  const by = [...fr].sort((a, b) => b.spent_lakh - a.spent_lakh);
+  const spenders = [...fr].sort((a, b) => b.spent_lakh - a.spent_lakh);
   const most = [...fr].sort((a, b) => b.squad_count - a.squad_count)[0];
-  const Row = ({ l, v }) => <div className="flex justify-between border-b border-white/10 py-2"><span className="text-slate-400">{l}</span><b>{v}</b></div>;
-  return (<div className="grid gap-4 md:grid-cols-2"><div className="card"><h3 className="mb-2 text-lg font-bold">Auction summary</h3>
-    <Row l="Most expensive player" v={top ? `${P[top.player_id]?.name} — ${cr(top.sold_lakh)} (${FR[top.sold_to]?.team})` : '—'} />
-    <Row l="Highest spender" v={by[0] ? `${by[0].team} (${cr(by[0].spent_lakh)})` : '—'} />
-    <Row l="Lowest spender" v={by.length ? `${by.at(-1).team} (${cr(by.at(-1).spent_lakh)})` : '—'} />
-    <Row l="Most purchases" v={most ? `${most.team} (${most.squad_count})` : '—'} />
-    <Row l="Total spent" v={cr(fr.reduce((s, f) => s + f.spent_lakh, 0))} /><Row l="Sold / Unsold / Remaining" v={`${sold.length} / ${rps.filter((r) => r.status === 'unsold').length} / ${rps.filter((r) => r.status === 'pending').length}`} /></div>
-    <div className="card"><h3 className="mb-2 text-lg font-bold">Spending by franchise</h3>{by.map((f) => <div key={f.id} className="mb-2 text-sm"><div className="flex justify-between"><span>{f.team}</span><span>{cr(f.spent_lakh)}</span></div>
-      <div className="h-2 rounded bg-white/10"><div className="h-2 rounded" style={{ width: `${(f.spent_lakh / room.purse_lakh) * 100}%`, background: f.color }} /></div></div>)}</div></div>);
+  const [ia, setIa] = useState(0), [ib, setIb] = useState(1), [busy, setBusy] = useState('');
+  const A = teams[ia] || teams[0], B = teams[ib] || teams[1];
+  const finished = room.status === 'done' || room.status === 'review';
+  const dealName = (d) => `${d.p.name} → ${FR[d.rp.sold_to]?.team} for ${cr(d.rp.sold_lakh)}`;
+  const run = async (key, fn) => { setBusy(key); try { await fn(); } catch (e) { alert('Could not create the image: ' + e.message); } setBusy(''); };
+  const shareSquad = (t) => run(t.f.id, async () => {
+    const blob = await squadImage({ team: t.f.team, owner: t.f.owner, color: t.f.color, isBot: t.f.is_bot, grade: t.st.grade, st: t.st, spent: t.f.spent_lakh, purse: room.purse_lakh - t.f.spent_lakh,
+      count: t.f.squad_count, os: t.f.os_count, minSquad: room.min_squad, roomName: room.name, code: room.code, rank: teams.indexOf(t) + 1, teamCount: teams.length,
+      players: t.sq.map((x) => ({ name: x.p.name, role: x.p.role, overseas: x.p.overseas, price: x.rp.sold_lakh })) });
+    await shareBlob(blob, `${t.f.team.replace(/\s+/g, '-')}-squad.png`, `${t.f.team} squad`);
+  });
+  const shareBoard = () => run('board', async () => {
+    const blob = await leaderboardImage({ roomName: room.name, code: room.code,
+      rows: teams.map((t) => ({ team: t.f.team, color: t.f.color, owner: t.f.owner, isBot: t.f.is_bot, count: t.f.squad_count, spent: t.f.spent_lakh, grade: t.st.grade, overall: t.st.overall })),
+      extra: [top ? `💰 Most expensive: ${P[top.player_id]?.name} — ${cr(top.sold_lakh)} (${FR[top.sold_to]?.team})` : '', bestValue[0] ? `🏆 Best value buy: ${dealName(bestValue[0])}` : ''].filter(Boolean) });
+    await shareBlob(blob, `leaderboard-${room.code}.png`, 'Auction leaderboard');
+  });
+  const Row = ({ l, v }) => <div className="flex justify-between gap-3 border-b border-white/10 py-2 text-sm"><span className="text-slate-400">{l}</span><b className="text-right">{v}</b></div>;
+  return (<div className="space-y-4">
+    {!finished && <p className="rounded-lg bg-amber-400/15 p-2 text-center text-sm text-amber-200">Auction still running — grades below are provisional and will change as squads fill up.</p>}
+    <div className="card"><div className="mb-2 flex flex-wrap items-center gap-2"><h3 className="text-lg font-bold">🏆 Leaderboard — team strength grades</h3>
+      <button disabled={busy === 'board'} onClick={shareBoard} className="btn ml-auto bg-amber-400 py-1 text-sm text-black">{busy === 'board' ? 'Creating…' : '📷 Share leaderboard image'}</button></div>
+      <p className="mb-2 text-xs text-slate-400">Grades are <b>game estimates</b> from player base-price tiers and squad balance — not official IPL ratings.</p>
+      <div className="space-y-3">{teams.map((t, i) => <div key={t.f.id} className={`rounded-xl p-3 ${i === 0 ? 'bg-amber-400/10 ring-1 ring-amber-300/50' : 'bg-white/5'}`}>
+        <div className="flex items-center gap-3"><span className="w-8 text-center text-xl font-black text-amber-300">{i === 0 ? '👑' : `#${i + 1}`}</span><Logo team={t.f.team} size={38} />
+          <div className="min-w-0 flex-1"><div className="truncate font-semibold">{t.f.team}{t.f.is_bot ? ' 🤖' : ''}</div><div className="text-xs text-slate-400">{t.f.owner} · {t.f.squad_count} players · spent {cr(t.f.spent_lakh)}</div></div>
+          <div className="text-right"><div className={`text-3xl font-black ${GCOL[t.st.grade]}`}>{t.st.grade}</div><div className="text-xs text-slate-400">{Math.round(t.st.overall)}/100</div></div></div>
+        <div className="mt-2 grid grid-cols-5 gap-2 text-center text-[11px] text-slate-400">{METRICS.map(([k, l]) => <div key={k}><Bar v={t.st[k]} color={t.f.color} />{l} {Math.round(t.st[k])}</div>)}</div>
+        <div className="mt-2 text-right"><button disabled={busy === t.f.id} onClick={() => shareSquad(t)} className="btn bg-white/10 py-1 text-xs">{busy === t.f.id ? 'Creating…' : '📷 Share squad image'}</button></div></div>)}</div></div>
+    <div className="grid gap-4 md:grid-cols-2">
+      <div className="card"><h3 className="mb-2 text-lg font-bold">🏅 Awards</h3>
+        <Row l="Most expensive player" v={top ? `${P[top.player_id]?.name} — ${cr(top.sold_lakh)} (${FR[top.sold_to]?.team})` : '—'} />
+        <Row l="Best value buy" v={bestValue[0] ? dealName(bestValue[0]) : '—'} />
+        <Row l="Biggest overpay" v={overpaid[0] && overpaid[0].save < 0 ? dealName(overpaid[0]) : '—'} />
+        <Row l="Highest spender" v={spenders[0] ? `${spenders[0].team} (${cr(spenders[0].spent_lakh)})` : '—'} />
+        <Row l="Lowest spender" v={spenders.length ? `${spenders.at(-1).team} (${cr(spenders.at(-1).spent_lakh)})` : '—'} />
+        <Row l="Most purchases" v={most ? `${most.team} (${most.squad_count})` : '—'} />
+        <Row l="Total spent" v={cr(fr.reduce((a, f) => a + f.spent_lakh, 0))} />
+        <Row l="Sold / Unsold / Remaining" v={`${sold.length} / ${rps.filter((r) => r.status === 'unsold').length} / ${rps.filter((r) => r.status === 'pending').length}`} />
+        {bestValue.length > 1 && <p className="pt-2 text-xs text-slate-400">Other bargains: {bestValue.slice(1).map(dealName).join(' · ')}</p>}
+        <p className="pt-1 text-xs text-slate-500">“Value” compares the price paid with a typical price for that player’s rating tier (an estimate).</p></div>
+      <div className="card"><h3 className="mb-2 text-lg font-bold">⚔ Compare two teams</h3>
+        {teams.length < 2 ? <p className="text-sm text-slate-400">Need two teams.</p> : <>
+          <div className="mb-3 grid grid-cols-2 gap-2"><select className="inp" value={ia} onChange={(e) => setIa(+e.target.value)}>{teams.map((t, i) => <option key={t.f.id} value={i}>{t.f.team}</option>)}</select>
+            <select className="inp" value={ib} onChange={(e) => setIb(+e.target.value)}>{teams.map((t, i) => <option key={t.f.id} value={i}>{t.f.team}</option>)}</select></div>
+          {METRICS.map(([k, l]) => <div key={k} className="mb-2 text-xs"><div className="mb-1 flex justify-between"><b>{Math.round(A.st[k])}</b><span className="text-slate-400">{l}</span><b>{Math.round(B.st[k])}</b></div>
+            <div className="grid grid-cols-2 gap-1"><div className="rotate-180"><Bar v={A.st[k]} color={A.f.color} /></div><Bar v={B.st[k]} color={B.f.color} /></div></div>)}
+          <div className="mt-2 flex justify-between text-sm font-bold"><span className={GCOL[A.st.grade]}>{A.f.team}: {A.st.grade}</span><span className={GCOL[B.st.grade]}>{B.f.team}: {B.st.grade}</span></div></>}</div></div>
+    <div className="card"><h3 className="mb-2 text-lg font-bold">Spending by franchise</h3>{spenders.map((f) => <div key={f.id} className="mb-2 text-sm"><div className="flex justify-between"><span>{f.team}</span><span>{cr(f.spent_lakh)}</span></div>
+      <div className="h-2 rounded bg-white/10"><div className="h-2 rounded" style={{ width: `${(f.spent_lakh / room.purse_lakh) * 100}%`, background: f.color }} /></div></div>)}</div>
+  </div>);
 }
