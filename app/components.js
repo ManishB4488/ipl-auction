@@ -20,3 +20,15 @@ export function Logo({ team, size = 36 }) {
     ? <img src={src} alt={team} referrerPolicy="no-referrer" style={box} className="shrink-0 rounded-full bg-white object-contain p-0.5" />
     : <div style={{ ...box, background: t.color, fontSize: size / 3.2 }} className="grid shrink-0 place-items-center rounded-full font-bold text-white">{t.short}</div>;
 }
+
+export async function logoUrl(team) {   // used by the shareable squad images
+  if (cache[team] !== undefined) return cache[team];
+  const t = teamInfo(team);
+  if (!t.wiki) return null;
+  try {
+    const r = await fetch('https://en.wikipedia.org/api/rest_v1/page/summary/' + t.wiki);
+    const j = r.ok ? await r.json() : null;
+    cache[team] = (j && j.thumbnail && j.thumbnail.source) || null;
+  } catch (e) { cache[team] = null; }
+  return cache[team];
+}

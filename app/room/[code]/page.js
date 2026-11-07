@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { sb, ensureUser, cr, setLabel } from '../../../lib/supabase';
 import { Logo } from '../../components';
+import { squadImage, leaderboardImage, shareBlob } from '../../shareimage';
 
 const inc = (c) => (c < 100 ? 5 : c < 200 ? 10 : c < 500 ? 20 : 25);
 const wikiCache = {};
@@ -452,18 +453,90 @@ function Squad({ f, room, rps, P }) {
       <ul className="divide-y divide-white/10 text-sm">{g.map((x) => <li key={x.id} className="flex justify-between py-1"><span>{x.p?.name} <span className="text-slate-400">{x.p?.country}</span></span><b>{cr(x.sold_lakh)}</b></li>)}</ul></div> : null; })}</div>);
 }
 
+// ---------- team strength (game estimates, NOT official ratings) ----------
+// Player rating comes from the player's base-price tier (+3 if capped). Team scores use the best players per area.
+const baseRating = (rp, p) => { const b = rp.base_lakh; const r = b >= 200 ? 90 : b >= 150 ? 80 : b >= 125 ? 75 : b >= 100 ? 70 : b >= 75 ? 62 : b >= 50 ? 52 : b >= 40 ? 46 : 40; return Math.min(99, r + (p.capped === 'Capped' ? 3 : 0)); };
+const EXPECT = [[40, 40], [46, 70], [52, 120], [62, 250], [70, 450], [80, 700], [90, 1200], [99, 1700]];   // rating -> typical price (lakh)
+const expectedPrice = (r) => { for (let i = 1; i < EXPECT.length; i++) if (r <= EXPECT[i][0]) { const [a, b] = [EXPECT[i - 1], EXPECT[i]]; return a[1] + (b[1] - a[1]) * (r - a[0]) / (b[0] - a[0]); } return EXPECT[EXPECT.length - 1][1]; };
+const avgTop = (arr, n, fill = 25) => { const t = [...arr].sort((a, b) => b - a).slice(0, n); while (t.length < n) t.push(fill); return t.reduce((a, b) => a + b, 0) / n; };
+function strength(sq, room) {
+  const by = (role) => sq.filter((x) => x.p.role === role).map((x) => x.r);
+  const bat = avgTop([...by('Batter'), ...by('Wicketkeeper'), ...by('All-rounder').map((r) => r * 0.9)], 6);
+  const bowl = avgTop([...by('Bowler'), ...by('All-rounder').map((r) => r * 0.85)], 5);
+  const ar = avgTop(by('All-rounder'), 3);
+  const keep = by('Wicketkeeper').length ? Math.max(...by('Wicketkeeper')) : 20;
+  let bal = 100;
+  Object.entries(TARGETS).forEach(([role, t]) => { bal -= Math.max(t - by(role).length, 0) * 8; });
+  bal = Math.max(0, bal - Math.max(room.min_squad - sq.length, 0) * 3);
+  const overall = bat * 0.30 + bowl * 0.30 + ar * 0.15 + keep * 0.10 + bal * 0.15;
+  const grade = overall >= 85 ? 'A+' : overall >= 78 ? 'A' : overall >= 70 ? 'B+' : overall >= 62 ? 'B' : overall >= 52 ? 'C' : 'D';
+  return { bat, bowl, ar, keep, bal, overall, grade };
+}
+const GCOL = { 'A+': 'text-green-400', A: 'text-green-300', 'B+': 'text-amber-300', B: 'text-amber-400', C: 'text-orange-400', D: 'text-red-400' };
+const Bar = ({ v, color }) => <div className="h-2 rounded bg-white/10"><div className="h-2 rounded" style={{ width: `${Math.min(100, Math.max(0, v))}%`, background: color }} /></div>;
+const METRICS = [['bat', 'Batting'], ['bowl', 'Bowling'], ['ar', 'All-rounders'], ['keep', 'Wicketkeeping'], ['bal', 'Squad balance']];
+
 function Final({ rps, P, FR, fr, room }) {
   const sold = rps.filter((r) => r.status === 'sold');
+  const teams = fr.map((f) => {
+    const sq = sold.filter((r) => r.sold_to === f.id).map((rp) => ({ rp, p: P[rp.player_id] })).filter((x) => x.p).map((x) => ({ ...x, r: baseRating(x.rp, x.p) }));
+    return { f, sq, st: strength(sq, room) };
+  }).sort((a, b) => b.st.overall - a.st.overall);
+  const deals = sold.map((rp) => { const p = P[rp.player_id]; if (!p) return null; const r = baseRating(rp, p); const e = expectedPrice(r); return { rp, p, r, e, save: e - rp.sold_lakh }; }).filter(Boolean);
+  const bestValue = [...deals].filter((d) => d.r >= 62).sort((a, b) => b.save - a.save).slice(0, 3);
+  const overpaid = [...deals].sort((a, b) => a.save - b.save).slice(0, 3);
   const top = [...sold].sort((a, b) => b.sold_lakh - a.sold_lakh)[0];
-  const by = [...fr].sort((a, b) => b.spent_lakh - a.spent_lakh);
+  const spenders = [...fr].sort((a, b) => b.spent_lakh - a.spent_lakh);
   const most = [...fr].sort((a, b) => b.squad_count - a.squad_count)[0];
-  const Row = ({ l, v }) => <div className="flex justify-between border-b border-white/10 py-2"><span className="text-slate-400">{l}</span><b>{v}</b></div>;
-  return (<div className="grid gap-4 md:grid-cols-2"><div className="card"><h3 className="mb-2 text-lg font-bold">Auction summary</h3>
-    <Row l="Most expensive player" v={top ? `${P[top.player_id]?.name} — ${cr(top.sold_lakh)} (${FR[top.sold_to]?.team})` : '—'} />
-    <Row l="Highest spender" v={by[0] ? `${by[0].team} (${cr(by[0].spent_lakh)})` : '—'} />
-    <Row l="Lowest spender" v={by.length ? `${by.at(-1).team} (${cr(by.at(-1).spent_lakh)})` : '—'} />
-    <Row l="Most purchases" v={most ? `${most.team} (${most.squad_count})` : '—'} />
-    <Row l="Total spent" v={cr(fr.reduce((s, f) => s + f.spent_lakh, 0))} /><Row l="Sold / Unsold / Remaining" v={`${sold.length} / ${rps.filter((r) => r.status === 'unsold').length} / ${rps.filter((r) => r.status === 'pending').length}`} /></div>
-    <div className="card"><h3 className="mb-2 text-lg font-bold">Spending by franchise</h3>{by.map((f) => <div key={f.id} className="mb-2 text-sm"><div className="flex justify-between"><span>{f.team}</span><span>{cr(f.spent_lakh)}</span></div>
-      <div className="h-2 rounded bg-white/10"><div className="h-2 rounded" style={{ width: `${(f.spent_lakh / room.purse_lakh) * 100}%`, background: f.color }} /></div></div>)}</div></div>);
+  const [ia, setIa] = useState(0), [ib, setIb] = useState(1), [busy, setBusy] = useState('');
+  const A = teams[ia] || teams[0], B = teams[ib] || teams[1];
+  const finished = room.status === 'done' || room.status === 'review';
+  const dealName = (d) => `${d.p.name} → ${FR[d.rp.sold_to]?.team} for ${cr(d.rp.sold_lakh)}`;
+  const run = async (key, fn) => { setBusy(key); try { await fn(); } catch (e) { alert('Could not create the image: ' + e.message); } setBusy(''); };
+  const shareSquad = (t) => run(t.f.id, async () => {
+    const blob = await squadImage({ team: t.f.team, owner: t.f.owner, color: t.f.color, isBot: t.f.is_bot, grade: t.st.grade, st: t.st, spent: t.f.spent_lakh, purse: room.purse_lakh - t.f.spent_lakh,
+      count: t.f.squad_count, os: t.f.os_count, minSquad: room.min_squad, roomName: room.name, code: room.code, rank: teams.indexOf(t) + 1, teamCount: teams.length,
+      players: t.sq.map((x) => ({ name: x.p.name, role: x.p.role, overseas: x.p.overseas, price: x.rp.sold_lakh })) });
+    await shareBlob(blob, `${t.f.team.replace(/\s+/g, '-')}-squad.png`, `${t.f.team} squad`);
+  });
+  const shareBoard = () => run('board', async () => {
+    const blob = await leaderboardImage({ roomName: room.name, code: room.code,
+      rows: teams.map((t) => ({ team: t.f.team, color: t.f.color, owner: t.f.owner, isBot: t.f.is_bot, count: t.f.squad_count, spent: t.f.spent_lakh, grade: t.st.grade, overall: t.st.overall })),
+      extra: [top ? `💰 Most expensive: ${P[top.player_id]?.name} — ${cr(top.sold_lakh)} (${FR[top.sold_to]?.team})` : '', bestValue[0] ? `🏆 Best value buy: ${dealName(bestValue[0])}` : ''].filter(Boolean) });
+    await shareBlob(blob, `leaderboard-${room.code}.png`, 'Auction leaderboard');
+  });
+  const Row = ({ l, v }) => <div className="flex justify-between gap-3 border-b border-white/10 py-2 text-sm"><span className="text-slate-400">{l}</span><b className="text-right">{v}</b></div>;
+  return (<div className="space-y-4">
+    {!finished && <p className="rounded-lg bg-amber-400/15 p-2 text-center text-sm text-amber-200">Auction still running — grades below are provisional and will change as squads fill up.</p>}
+    <div className="card"><div className="mb-2 flex flex-wrap items-center gap-2"><h3 className="text-lg font-bold">🏆 Leaderboard — team strength grades</h3>
+      <button disabled={busy === 'board'} onClick={shareBoard} className="btn ml-auto bg-amber-400 py-1 text-sm text-black">{busy === 'board' ? 'Creating…' : '📷 Share leaderboard image'}</button></div>
+      <p className="mb-2 text-xs text-slate-400">Grades are <b>game estimates</b> from player base-price tiers and squad balance — not official IPL ratings.</p>
+      <div className="space-y-3">{teams.map((t, i) => <div key={t.f.id} className={`rounded-xl p-3 ${i === 0 ? 'bg-amber-400/10 ring-1 ring-amber-300/50' : 'bg-white/5'}`}>
+        <div className="flex items-center gap-3"><span className="w-8 text-center text-xl font-black text-amber-300">{i === 0 ? '👑' : `#${i + 1}`}</span><Logo team={t.f.team} size={38} />
+          <div className="min-w-0 flex-1"><div className="truncate font-semibold">{t.f.team}{t.f.is_bot ? ' 🤖' : ''}</div><div className="text-xs text-slate-400">{t.f.owner} · {t.f.squad_count} players · spent {cr(t.f.spent_lakh)}</div></div>
+          <div className="text-right"><div className={`text-3xl font-black ${GCOL[t.st.grade]}`}>{t.st.grade}</div><div className="text-xs text-slate-400">{Math.round(t.st.overall)}/100</div></div></div>
+        <div className="mt-2 grid grid-cols-5 gap-2 text-center text-[11px] text-slate-400">{METRICS.map(([k, l]) => <div key={k}><Bar v={t.st[k]} color={t.f.color} />{l} {Math.round(t.st[k])}</div>)}</div>
+        <div className="mt-2 text-right"><button disabled={busy === t.f.id} onClick={() => shareSquad(t)} className="btn bg-white/10 py-1 text-xs">{busy === t.f.id ? 'Creating…' : '📷 Share squad image'}</button></div></div>)}</div></div>
+    <div className="grid gap-4 md:grid-cols-2">
+      <div className="card"><h3 className="mb-2 text-lg font-bold">🏅 Awards</h3>
+        <Row l="Most expensive player" v={top ? `${P[top.player_id]?.name} — ${cr(top.sold_lakh)} (${FR[top.sold_to]?.team})` : '—'} />
+        <Row l="Best value buy" v={bestValue[0] ? dealName(bestValue[0]) : '—'} />
+        <Row l="Biggest overpay" v={overpaid[0] && overpaid[0].save < 0 ? dealName(overpaid[0]) : '—'} />
+        <Row l="Highest spender" v={spenders[0] ? `${spenders[0].team} (${cr(spenders[0].spent_lakh)})` : '—'} />
+        <Row l="Lowest spender" v={spenders.length ? `${spenders.at(-1).team} (${cr(spenders.at(-1).spent_lakh)})` : '—'} />
+        <Row l="Most purchases" v={most ? `${most.team} (${most.squad_count})` : '—'} />
+        <Row l="Total spent" v={cr(fr.reduce((a, f) => a + f.spent_lakh, 0))} />
+        <Row l="Sold / Unsold / Remaining" v={`${sold.length} / ${rps.filter((r) => r.status === 'unsold').length} / ${rps.filter((r) => r.status === 'pending').length}`} />
+        {bestValue.length > 1 && <p className="pt-2 text-xs text-slate-400">Other bargains: {bestValue.slice(1).map(dealName).join(' · ')}</p>}
+        <p className="pt-1 text-xs text-slate-500">“Value” compares the price paid with a typical price for that player’s rating tier (an estimate).</p></div>
+      <div className="card"><h3 className="mb-2 text-lg font-bold">⚔ Compare two teams</h3>
+        {teams.length < 2 ? <p className="text-sm text-slate-400">Need two teams.</p> : <>
+          <div className="mb-3 grid grid-cols-2 gap-2"><select className="inp" value={ia} onChange={(e) => setIa(+e.target.value)}>{teams.map((t, i) => <option key={t.f.id} value={i}>{t.f.team}</option>)}</select>
+            <select className="inp" value={ib} onChange={(e) => setIb(+e.target.value)}>{teams.map((t, i) => <option key={t.f.id} value={i}>{t.f.team}</option>)}</select></div>
+          {METRICS.map(([k, l]) => <div key={k} className="mb-2 text-xs"><div className="mb-1 flex justify-between"><b>{Math.round(A.st[k])}</b><span className="text-slate-400">{l}</span><b>{Math.round(B.st[k])}</b></div>
+            <div className="grid grid-cols-2 gap-1"><div className="rotate-180"><Bar v={A.st[k]} color={A.f.color} /></div><Bar v={B.st[k]} color={B.f.color} /></div></div>)}
+          <div className="mt-2 flex justify-between text-sm font-bold"><span className={GCOL[A.st.grade]}>{A.f.team}: {A.st.grade}</span><span className={GCOL[B.st.grade]}>{B.f.team}: {B.st.grade}</span></div></>}</div></div>
+    <div className="card"><h3 className="mb-2 text-lg font-bold">Spending by franchise</h3>{spenders.map((f) => <div key={f.id} className="mb-2 text-sm"><div className="flex justify-between"><span>{f.team}</span><span>{cr(f.spent_lakh)}</span></div>
+      <div className="h-2 rounded bg-white/10"><div className="h-2 rounded" style={{ width: `${(f.spent_lakh / room.purse_lakh) * 100}%`, background: f.color }} /></div></div>)}</div>
+  </div>);
 }
