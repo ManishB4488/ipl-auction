@@ -56,3 +56,13 @@ Default order is **Capped first, then Uncapped**: 15 Indian batters, 10 overseas
 10 overseas bowlers (all capped), then every uncapped player as batters → all-rounders → wicketkeepers → bowlers. Capped players beyond those
 block sizes are auctioned at the end of the capped phase, before any uncapped player. Block sizes are the `p_quota` argument of `create_room`.
 Keep "Include retained stars" ticked: without them there are only 4 Indian capped batters, so the 15-player block can't fill.
+
+## Playing XI, Captain, Vice-captain & backups (run `supabase/update_lineup.sql` once)
+- New **My XI** tab + a compact **📋 My XI** card on the Live tab. 11 slots in batting order (default 4 BAT · 1 WK · 2 AR · 4 BOWL; each slot's wanted position can be changed).
+- **During the auction** it is a private plan that autosaves: empty slots show the positions you still need, a slot can hold a player you own or a **target** still to come
+  (the status line shows ON NOW / NEXT UP / sold to another team), and the current lot has a "📋 Plan for my XI" picker. New buys are auto-placed into the first open slot of the same position (toggle available).
+  The "What my team needs" card also reports open XI slots and whether the player on the block fills one.
+- **✨ Auto-fill** completes empty slots, C/VC and 2 backups per slot from your squad (max 4 overseas in the XI).
+- **When the auction ends** (room status `done`) every slot must be a player you own, with a captain and a different vice-captain, then press **🔒 Lock my final XI** (can be unlocked again).
+- **Final tab** reveals every team's XI with C / VC / backups. Teams with no saved XI (bots, or players who never made one) are auto-picked and labelled as such.
+- Privacy is enforced by RLS: others only see your XI once it is locked or the auction is done. Saving/locking run in Postgres functions (`save_lineup`, `lock_lineup`, `unlock_lineup`).

@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { sb, ensureUser, cr, setLabel } from '../../../lib/supabase';
 import { Logo } from '../../components';
 import { squadImage, leaderboardImage, shareBlob } from '../../shareimage';
+import { useLineup, XiMini, XiEditor, XiShowcase, QuickSlot, baseRating } from '../../lineup';
 
 const inc = (c) => (c < 100 ? 5 : c < 200 ? 10 : c < 500 ? 20 : 25);
 const wikiCache = {};
@@ -47,7 +48,7 @@ function PlayerInfo({ p, rp, room }) {
 }
 
 const TARGETS = { Batter: 5, Wicketkeeper: 2, 'All-rounder': 4, Bowler: 6 };   // suggested balanced minimum (17 of the 18 minimum squad)
-function Needs({ room, mine, rps, P, cur }) {
+function Needs({ room, mine, rps, P, cur, xi }) {
   const sq = rps.filter((r) => r.sold_to === mine.id);
   const have = (role) => sq.filter((r) => P[r.player_id]?.role === role).length;
   const left = room.purse_lakh - mine.spent_lakh;
@@ -55,12 +56,16 @@ function Needs({ room, mine, rps, P, cur }) {
   const maxBid = Math.max(left - Math.max(room.min_squad - mine.squad_count - 1, 0) * 30, 0);
   const curP = cur ? P[cur.player_id] : null;
   const osLeft = Math.max(room.max_overseas - mine.os_count, 0);
+  const xiFree = xi?.lu ? xi.lu.slots.map((x, i) => ({ x, i })).filter(({ x }) => ['empty', 'lost', 'gone'].includes(xi.stateOf(x.pid).k)) : [];
+  const xiAt = xi?.lu && curP ? xi.lu.slots.findIndex((x) => x.pid === curP.id) : -1;
+  const xiOpen = curP ? xiFree.find(({ x }) => x.want === curP.role) : null;
   let hint = null;
-  if (curP) hint = (curP.overseas && osLeft === 0) ? ['⚠ You have no overseas slot left for this player', 'bg-red-500/20'] : Math.max(TARGETS[curP.role] - have(curP.role), 0) > 0 ? ['🎯 This player fills a need in your squad', 'bg-green-600/25'] : ['This role is already covered in your squad', 'bg-white/10'];
+  if (curP) hint = (curP.overseas && osLeft === 0) ? ['⚠ You have no overseas slot left for this player', 'bg-red-500/20'] : xiAt >= 0 ? [`📋 Already planned in your XI at #${xiAt + 1}`, 'bg-green-600/25'] : xiOpen ? [`🎯 Fills open XI slot #${xiOpen.i + 1} (${curP.role})`, 'bg-green-600/25'] : Math.max(TARGETS[curP.role] - have(curP.role), 0) > 0 ? ['🎯 This player fills a need in your squad', 'bg-green-600/25'] : ['This role is already covered in your squad', 'bg-white/10'];
   return (<div className="card space-y-2"><h3 className="font-semibold">What my team needs</h3>
     <div className="grid grid-cols-2 gap-2 text-center text-xs">{ROLES.map(([role, label]) => { const need = Math.max(TARGETS[role] - have(role), 0); return <div key={role} className={`rounded-lg p-2 ${need ? 'bg-amber-400/15' : 'bg-green-600/20'} ${curP && curP.role === role ? 'ring-1 ring-amber-300' : ''}`}>
       <div className="text-slate-300">{label}</div><div className="text-base font-bold">{have(role)}/{TARGETS[role]}</div><div>{need ? `need ${need} more` : '✅ covered'}</div></div>; })}</div>
     <p className="text-xs text-slate-400">Suggested balance only — you can build any squad you like.</p>
+    {xi?.summary && <p className="text-xs text-slate-300">📋 Playing XI: <b>{xi.summary.planned}/11</b> planned{xiFree.length ? <> · still need: <b>{Object.entries(xi.summary.open).map(([r, n]) => `${r} ×${n}`).join(', ')}</b></> : ' · all slots planned ✔'}</p>}
     <p className="text-xs text-slate-300">✈ Overseas slots left: <b>{osLeft}</b> of {room.max_overseas} · Squad <b>{mine.squad_count}</b> (min {room.min_squad}, max {room.max_squad})</p>
     <p className="text-xs text-slate-300">💰 Purse <b>{cr(left)}</b> · {toMin} more player{toMin === 1 ? '' : 's'} needed for the minimum squad<br />Safe average per remaining slot: <b>{toMin ? cr(Math.round(left / toMin)) : '—'}</b><br />Most you can bid on one player now: <b>{cr(maxBid)}</b> <span className="text-slate-500">(keeps ₹30 L per slot for the minimum squad)</span></p>
     {hint && <p className={`rounded p-1 text-center text-xs ${hint[1]}`}>{hint[0]}</p>}</div>);
@@ -128,7 +133,7 @@ function Upcoming({ rps, P, cur, isHost, act, watchSet, mine }) {
     <ul className="max-h-56 divide-y divide-white/10 overflow-y-auto text-sm">{list.map((x) => { const p = P[x.player_id]; return <li key={x.id} className={`flex justify-between py-1 ${watchSet && watchSet.has(x.player_id) ? 'bg-yellow-300/10' : ''}`}><span>{mine && <button title="Watchlist" onClick={() => act('toggle_watch', { p_player: x.player_id })} className="mr-1 text-yellow-300">{watchSet && watchSet.has(x.player_id) ? '★' : '☆'}</button>}{p?.name} <span className="text-slate-400">{p?.country}</span></span><span className="flex items-center gap-2">{cr(x.base_lakh)}{isHost && x.status === 'pending' && <button title="Bots sit out this player" onClick={() => act('host_bots_skip', { p_rp: x.id, p_skip: !x.bots_skip })} className={`rounded px-1 text-xs ${x.bots_skip ? 'bg-red-500/70' : 'bg-white/10'}`}>{x.bots_skip ? '🚫🤖' : '🤖'}</button>}</span></li>; })}
       {by(active).length > 15 && <li className="py-1 text-slate-400">+{by(active).length - 15} more…</li>}</ul></div>);
 }
-const TABS = ['Live', 'Results Table', 'My Franchise', 'All Teams', 'Final'];
+const TABS = ['Live', 'Results Table', 'My Franchise', 'My XI', 'All Teams', 'Final'];
 
 // ---------- sound effects (synthesised in the browser, no audio files) ----------
 let _ctx;
@@ -184,19 +189,19 @@ function PinBadge({ pin }) {
 export default function Room({ params }) {
   const code = params.code.toUpperCase();
   const [me, setMe] = useState(null), [info, setInfo] = useState(null), [room, setRoom] = useState(null);
-  const [autos, setAutos] = useState([]), [watch, setWatch] = useState([]);
+  const [autos, setAutos] = useState([]), [watch, setWatch] = useState([]), [lus, setLus] = useState(null);
   const [fr, setFr] = useState([]), [rps, setRps] = useState([]), [bids, setBids] = useState([]), [P, setP] = useState({});
   const [pin, setPin] = useState(null);
   const [tab, setTab] = useState('Live'), [msg, setMsg] = useState(''), [now, setNow] = useState(Date.now()), [err, setErr] = useState('');
 
   const load = useCallback(async (id) => {
-    const [r, f, p, b, au, wa] = await Promise.all([
+    const [r, f, p, b, au, wa, lu] = await Promise.all([
       sb.from('rooms').select('*').eq('id', id).maybeSingle(),
       sb.from('franchises').select('*').eq('room_id', id).order('created_at'),
       sb.from('room_players').select('*').eq('room_id', id).order('seq').limit(1000),
       sb.from('bids').select('*').eq('room_id', id).order('id', { ascending: false }).limit(300),
-      sb.from('auto_bids').select('*').eq('room_id', id), sb.from('watchlist').select('*').eq('room_id', id)]);   // RLS: only your own rows
-    setRoom(r.data); setFr(f.data || []); setRps(p.data || []); setBids(b.data || []); setAutos(au.data || []); setWatch(wa.data || []);
+      sb.from('auto_bids').select('*').eq('room_id', id), sb.from('watchlist').select('*').eq('room_id', id), sb.from('lineups').select('*').eq('room_id', id)]);   // RLS: only your own rows
+    setRoom(r.data); setFr(f.data || []); setRps(p.data || []); setBids(b.data || []); setAutos(au.data || []); setWatch(wa.data || []); setLus(lu.error ? [] : lu.data || []);
   }, []);
 
   useEffect(() => {
@@ -287,6 +292,8 @@ export default function Room({ params }) {
     load(room.id);
   };
 
+  const xi = useLineup({ rows: lus, room, mine, rps, P, act });
+
   if (err) return <p className="text-red-400">{err}</p>;
   if (!info || !me) return <p>Loading…</p>;
   if (!room) return <p className="card">This room is private to participants (spectators disabled) or you are not a member. <a className="underline text-amber-400" href="/">Join from the home page</a> with code <b>{code}</b>, or <a className="underline text-amber-400" href={`/rejoin?code=${code}`}>rejoin with your PIN</a>.</p>;
@@ -305,11 +312,12 @@ export default function Room({ params }) {
     </div>
     {msg && <p className="rounded-lg bg-red-500/20 p-2 text-sm">{msg}</p>}
     {!mine && <p className="rounded-lg bg-white/10 p-2 text-sm">You are watching as a spectator. Are you a player? <a className="text-amber-400 underline" href={`/rejoin?code=${code}`}>Rejoin with your PIN</a></p>}
-    {tab === 'Live' && (room.status === 'accel_pick' ? <AccelPick {...{ room, fr, rps, P, mine, isHost, act }} /> : <Live {...{ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act, autos, watch, play }} />)}
+    {tab === 'Live' && (room.status === 'accel_pick' ? <AccelPick {...{ room, fr, rps, P, mine, isHost, act }} /> : <Live {...{ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act, autos, watch, play, xi, setTab }} />)}
     {tab === 'Results Table' && <Table {...{ rps, P, FR, fr, isHost, act, room }} />}
     {tab === 'My Franchise' && (mine ? <Squad f={mine} room={room} rps={rps} P={P} /> : <p className="card">You are watching as a spectator.</p>)}
+    {tab === 'My XI' && (mine ? <XiEditor {...{ xi, room, rps, P, FR, watch }} /> : <p className="card">You are watching as a spectator.</p>)}
     {tab === 'All Teams' && <div className="grid gap-4 md:grid-cols-2">{fr.map((f) => <Squad key={f.id} f={f} room={room} rps={rps} P={P} />)}</div>}
-    {tab === 'Final' && <Final {...{ rps, P, FR, fr, room }} />}
+    {tab === 'Final' && <Final {...{ rps, P, FR, fr, room, lus, mine }} />}
   </div>);
 }
 
@@ -335,7 +343,7 @@ function Lobby({ room, fr, isHost, act, link, msg, mine, pin }) {
       {msg && <p className="text-sm text-red-400">{msg}</p>}</div>}</div>);
 }
 
-function Live({ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act, autos, watch, play }) {
+function Live({ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act, autos, watch, play, xi, setTab }) {
   const watchSet = new Set(watch.map((w) => w.player_id));
   const p = cur && P[cur.player_id];
   const recent = [...rps].filter((x) => x.sold_at).sort((a, b) => new Date(b.sold_at) - new Date(a.sold_at)).slice(0, 6);
@@ -366,7 +374,7 @@ function Live({ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act, autos,
         <div className="flex flex-wrap items-center gap-4">
           <Photo name={p.name} />
           <div className="flex-1"><h2 className="text-3xl font-extrabold">{p.name}{mine && <button title="Add to watchlist" onClick={() => act('toggle_watch', { p_player: p.id })} className="ml-2 text-3xl text-yellow-300">{watchSet.has(p.id) ? '★' : '☆'}</button>}</h2>
-            <PlayerInfo p={p} rp={cur} room={room} /></div>
+            <PlayerInfo p={p} rp={cur} room={room} />{mine && <QuickSlot xi={xi} p={p} />}</div>
           <div className={`text-5xl font-black tabular-nums ${left < 5000 ? 'text-red-400' : 'text-amber-400'}`}>{Math.ceil(left / 1000)}s</div></div>
         {call && <div key={call} className="pop mt-3 rounded-xl bg-amber-400/15 p-2 text-center text-xl font-extrabold text-amber-300">🔨 {call}</div>}
         <div className="mt-4 grid grid-cols-2 gap-3 text-center">
@@ -399,7 +407,8 @@ function Live({ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act, autos,
     <div className="space-y-4"><div className="card"><h3 className="font-semibold">Progress</h3>
       <p className="text-sm">{done}/{total} auctioned · {sold} sold · {rps.filter((x) => x.status === 'unsold').length} unsold · {rps.filter((x) => x.status === 'pending').length} remaining</p>
       <div className="mt-2 h-2 rounded bg-white/10"><div className="h-2 rounded bg-amber-400" style={{ width: `${(done / Math.max(total, 1)) * 100}%` }} /></div></div>
-      {mine && <Needs room={room} mine={mine} rps={rps} P={P} cur={cur} />}
+      {mine && <Needs room={room} mine={mine} rps={rps} P={P} cur={cur} xi={xi} />}
+      {mine && <XiMini xi={xi} setTab={setTab} P={P} />}
       {mine && <Watchlist watch={watch} rps={rps} P={P} autos={autos} act={act} />}
       <Upcoming rps={rps} P={P} cur={cur} isHost={isHost} act={act} watchSet={watchSet} mine={mine} />
       <div className="card space-y-2"><h3 className="font-semibold">Teams</h3>{fr.map((f) => <div key={f.id} className="flex items-center gap-2 text-sm">
@@ -455,7 +464,6 @@ function Squad({ f, room, rps, P }) {
 
 // ---------- team strength (game estimates, NOT official ratings) ----------
 // Player rating comes from the player's base-price tier (+3 if capped). Team scores use the best players per area.
-const baseRating = (rp, p) => { const b = rp.base_lakh; const r = b >= 200 ? 90 : b >= 150 ? 80 : b >= 125 ? 75 : b >= 100 ? 70 : b >= 75 ? 62 : b >= 50 ? 52 : b >= 40 ? 46 : 40; return Math.min(99, r + (p.capped === 'Capped' ? 3 : 0)); };
 const EXPECT = [[40, 40], [46, 70], [52, 120], [62, 250], [70, 450], [80, 700], [90, 1200], [99, 1700]];   // rating -> typical price (lakh)
 const expectedPrice = (r) => { for (let i = 1; i < EXPECT.length; i++) if (r <= EXPECT[i][0]) { const [a, b] = [EXPECT[i - 1], EXPECT[i]]; return a[1] + (b[1] - a[1]) * (r - a[0]) / (b[0] - a[0]); } return EXPECT[EXPECT.length - 1][1]; };
 const avgTop = (arr, n, fill = 25) => { const t = [...arr].sort((a, b) => b - a).slice(0, n); while (t.length < n) t.push(fill); return t.reduce((a, b) => a + b, 0) / n; };
@@ -476,7 +484,7 @@ const GCOL = { 'A+': 'text-green-400', A: 'text-green-300', 'B+': 'text-amber-30
 const Bar = ({ v, color }) => <div className="h-2 rounded bg-white/10"><div className="h-2 rounded" style={{ width: `${Math.min(100, Math.max(0, v))}%`, background: color }} /></div>;
 const METRICS = [['bat', 'Batting'], ['bowl', 'Bowling'], ['ar', 'All-rounders'], ['keep', 'Wicketkeeping'], ['bal', 'Squad balance']];
 
-function Final({ rps, P, FR, fr, room }) {
+function Final({ rps, P, FR, fr, room, lus, mine }) {
   const sold = rps.filter((r) => r.status === 'sold');
   const teams = fr.map((f) => {
     const sq = sold.filter((r) => r.sold_to === f.id).map((rp) => ({ rp, p: P[rp.player_id] })).filter((x) => x.p).map((x) => ({ ...x, r: baseRating(x.rp, x.p) }));
@@ -508,6 +516,7 @@ function Final({ rps, P, FR, fr, room }) {
   const Row = ({ l, v }) => <div className="flex justify-between gap-3 border-b border-white/10 py-2 text-sm"><span className="text-slate-400">{l}</span><b className="text-right">{v}</b></div>;
   return (<div className="space-y-4">
     {!finished && <p className="rounded-lg bg-amber-400/15 p-2 text-center text-sm text-amber-200">Auction still running — grades below are provisional and will change as squads fill up.</p>}
+    <XiShowcase {...{ fr, rows: lus, rps, P, FR, room, mine }} />
     <div className="card"><div className="mb-2 flex flex-wrap items-center gap-2"><h3 className="text-lg font-bold">🏆 Leaderboard — team strength grades</h3>
       <button disabled={busy === 'board'} onClick={shareBoard} className="btn ml-auto bg-amber-400 py-1 text-sm text-black">{busy === 'board' ? 'Creating…' : '📷 Share leaderboard image'}</button></div>
       <p className="mb-2 text-xs text-slate-400">Grades are <b>game estimates</b> from player base-price tiers and squad balance — not official IPL ratings.</p>
