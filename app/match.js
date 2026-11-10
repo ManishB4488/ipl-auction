@@ -5,7 +5,7 @@ import { sb } from '../lib/supabase';
 import { Logo } from './components';
 import { prepTeams } from './league';
 import { strength } from './leaguesim';
-import { advance, newMatchState, makeSide, oversText, chaseInfo, MAX_BOWL_BALLS, OVERS, bowlSkill } from './matchengine';
+import { advance, newMatchState, makeSide, oversText, chaseInfo, stepInfo, shotTable, MAX_BOWL_BALLS, OVERS, bowlSkill } from './matchengine';
 
 const SHORT = { Batter: 'BAT', Wicketkeeper: 'WK', 'All-rounder': 'AR', Bowler: 'BOWL' };
 const LIST_COLS = 'id,fa,fb,status,winner,created_at,ver,result:state->result';
@@ -30,7 +30,7 @@ export function MatchTab({ fr, lus, rps, P, room, mine }) {
   }, [openId]);
 
   useEffect(() => { if (!done) return; loadList(); const id = setInterval(loadList, 3000); return () => clearInterval(id); }, [done, loadList]);
-  useEffect(() => { loadCur(); if (!openId) return; const id = setInterval(loadCur, 1500); return () => clearInterval(id); }, [openId, loadCur]);
+  useEffect(() => { loadCur(); if (!openId) return; const id = setInterval(loadCur, 1000); return () => clearInterval(id); }, [openId, loadCur]);
   useEffect(() => { const id = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(id); }, []);
 
   const myActive = useMemo(() => (list || []).find((m) => (m.status === 'pending' || m.status === 'playing') && mine && (m.fa === mine.id || m.fb === mine.id)), [list, mine]);
@@ -42,7 +42,7 @@ export function MatchTab({ fr, lus, rps, P, room, mine }) {
     if (cur.fa !== mine.id && cur.fb !== mine.id) return;
     const nx = advance(cur.state, Date.now()); if (!nx) return;
     busy.current = true;
-    (async () => { await sb.rpc('match_apply', { p_match: cur.id, p_ver: cur.ver, p_state: nx }); await loadCur(); await loadList(); busy.current = false; })();
+    (async () => { await sb.rpc('match_apply', { p_match: cur.id, p_ver: cur.ver, p_state: nx }); busy.current = false; await loadCur(); loadList(); })();
   }, [cur, now]);
 
   if (!done) return <div className="card text-center"><h2 className="font-display text-3xl font-extrabold uppercase">⚔️ Match Arena</h2>
@@ -58,9 +58,20 @@ export function MatchTab({ fr, lus, rps, P, room, mine }) {
     if (opp.is_bot) setOpenId(data.slice(3));
     loadList();
   };
+  const submit = async (choice) => {
+    const m = cur; if (!m) return 'no match';
+    const side = mine.id === m.fa ? 'A' : 'B', oppBot = !!FR[side === 'A' ? m.fb : m.fa]?.is_bot;
+    if (oppBot && m.state.deadline != null) {                         // vs a bot: apply the result in one round trip
+      if (busy.current) return 'busy';
+      const nx = advance({ ...m.state, choices: { ...m.state.choices, [side]: choice } }, Date.now());
+      if (nx) { busy.current = true; const { data } = await sb.rpc('match_apply', { p_match: m.id, p_ver: m.ver, p_state: nx }); busy.current = false; await loadCur(); return data === 'ok' ? 'ok' : data; }
+    }
+    const { data, error } = await sb.rpc('match_choose', { p_match: m.id, p_key: m.state.key, p_choice: choice });
+    await loadCur(); return error ? error.message : data;
+  };
   const respond = async (m, accept) => { const { data, error } = await sb.rpc('match_respond', { p_match: m.id, p_accept: accept }); if (error || data !== 'ok') setMsg(error?.message || data); else { if (accept) setOpenId(m.id); loadList(); } };
 
-  if (openId && cur && cur.id === openId) return <MatchView {...{ m: cur, mine, FR, now, back: () => { setSkip(openId); setOpenId(null); setCur(null); loadList(); }, reload: async () => { await loadCur(); await loadList(); }, setMsg, msg }} />;
+  if (openId && cur && cur.id === openId) return <MatchView {...{ m: cur, mine, FR, now, submit, back: () => { setSkip(openId); setOpenId(null); setCur(null); loadList(); }, reload: async () => { await loadCur(); await loadList(); }, setMsg, msg }} />;
 
   const incoming = (list || []).filter((m) => m.status === 'pending' && m.fb === mine.id);
   const outgoing = (list || []).filter((m) => m.status === 'pending' && m.fa === mine.id);
@@ -74,7 +85,7 @@ export function MatchTab({ fr, lus, rps, P, room, mine }) {
 
   return (<div className="space-y-4">
     <div className="card space-y-2"><h2 className="font-display text-3xl font-extrabold uppercase">⚔️ Match Arena</h2>
-      <p className="text-sm text-slate-300">Play a 20-over match with your own squad. Every over <b>both captains lock in a decision</b>: the batting side picks <b>Defend / Normal / Attack</b>, the bowling side picks <b>who bowls</b> (max 4 overs each, not two in a row). Once per match you can bring in an <b>Impact Player</b> from your backups. If you take more than 30 seconds the AI decides for you. Bots accept instantly.</p>
+      <p className="text-sm text-slate-300">Play a 20-over match with your own squad. <b>Every ball the batter chooses the shot</b> — go for <b>1, 2, 4 or 6</b> (or block) — and each choice has its own chance of working and of getting you out. <b>Every over the bowling side picks the bowler and a plan</b> (hunt wickets / balanced / tight). Once per match you can use the <b>Impact Player</b>: swap <b>any</b> XI player with <b>any</b> backup. Bots accept instantly; if you take too long the AI plays the ball for you.</p>
       {msg && <p className="rounded bg-red-500/20 p-2 text-sm text-red-200">{msg}</p>}</div>
 
     {incoming.map((m) => <div key={m.id} className="card flex flex-wrap items-center gap-2 border-amber-400"><span className="mr-auto">⚔️ <b style={{ color: FR[m.fa]?.color }}>{FR[m.fa]?.team}</b> ({FR[m.fa]?.owner}) challenged you!</span>
@@ -100,10 +111,10 @@ export function MatchTab({ fr, lus, rps, P, room, mine }) {
 }
 
 // ---------------------------------------------------------------- one match
-export function MatchView({ m, mine, FR, now, back, reload, setMsg, msg }) {
+export function MatchView({ m, mine, FR, now, submit, back, setMsg, msg }) {
   const S = m.state, mySide = mine.id === m.fa ? 'A' : mine.id === m.fb ? 'B' : null;
-  const [tab, setTab] = useState('live'), [intent, setIntent] = useState('normal'), [bowler, setBowler] = useState(null), [impOpen, setImpOpen] = useState(false), [imp, setImp] = useState({ out: '', in: '' }), [sending, setSending] = useState(false);
-  useEffect(() => { setIntent('normal'); setBowler(null); setImpOpen(false); setImp({ out: '', in: '' }); }, [S.key]);
+  const [tab, setTab] = useState('live'), [bowler, setBowler] = useState(null), [plan, setPlan] = useState('balanced'), [impOpen, setImpOpen] = useState(false), [imp, setImp] = useState({ out: '', in: '' }), [sending, setSending] = useState(false);
+  useEffect(() => { setBowler(null); setPlan('balanced'); }, [S.key]);
   const bits = useMemo(() => Array.from({ length: 36 }, (_, i) => ({ left: Math.random() * 100, delay: Math.random() * 1.5, dur: 2.5 + Math.random() * 2, color: ['#ff8a1f', '#fbbf24', '#3b82f6', '#22c55e', '#f43f5e'][i % 5] })), []);
 
   const inn = S.innings[S.inn - 1];
@@ -113,20 +124,16 @@ export function MatchView({ m, mine, FR, now, back, reload, setMsg, msg }) {
   const ovr = (x) => { const i = S.innings.find((v) => v.bat === x); return i ? oversText(i.balls) : ''; };
   const send = async (choice) => {
     setSending(true); setMsg('');
-    const { data, error } = await sb.rpc('match_choose', { p_match: m.id, p_key: S.key, p_choice: choice });
-    setSending(false);
-    if (error) setMsg(error.message); else if (data !== 'ok') setMsg(data === 'stale' ? 'That over has already been played.' : data);
-    reload();
+    const res = await submit(choice);
+    setSending(false); if (res && res !== 'ok' && res !== 'busy') setMsg(res === 'stale' ? 'That moment has passed.' : res);
   };
-  const sd = mySide ? S.sides[mySide] : null;
-  const myChoice = mySide ? S.choices[mySide] : null;
+  const sd = mySide ? S.sides[mySide] : null, myChoice = mySide ? S.choices[mySide] : null;
   const impactChoice = impOpen && imp.out !== '' && imp.in !== '' ? { impact: { out: +imp.out, in: +imp.in } } : {};
   const Header = (<div className="card" style={{ background: 'linear-gradient(90deg, rgba(27,75,214,.25), rgba(10,18,48,.6))' }}>
     <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-center">
       {['A', 'B'].map((x, k) => { const t = sideTeam(x); return (<div key={x} className={k ? 'order-3' : ''}><div className="flex items-center justify-center gap-2"><Logo team={t.team} size={34} /><b className="font-display text-xl uppercase" style={{ color: t.color }}>{t.team}</b></div>
         <div className="score text-4xl font-extrabold">{score(x)}</div><div className="text-xs text-slate-400">{ovr(x) && `(${ovr(x)} ov)`}{mySide === x ? ' · YOU' : ''}</div></div>); })}
       <div className="order-2 font-display text-2xl text-amber-400">VS</div></div></div>);
-
   const Back = <button onClick={back} className="btn bg-white/10 py-1 text-sm">← Arena</button>;
 
   // ---- finished
@@ -152,16 +159,24 @@ export function MatchView({ m, mine, FR, now, back, reload, setMsg, msg }) {
   }
 
   // ---- playing
-  const batSide = inn.bat, bowlSide = inn.bowl, bT = S.sides[batSide], wT = S.sides[bowlSide];
+  const { step, need } = stepInfo(S), iReq = mySide === need;
+  const batSide = inn.bat, bowlSide = inn.bowl, bT = S.sides[batSide], wT = S.sides[bowlSide], cur = S.cur;
   const ci = chaseInfo(S), crr = inn.balls ? (inn.runs / inn.balls) * 6 : 0;
-  const last = inn.overs[inn.overs.length - 1];
-  const imBat = mySide === batSide, imBowl = mySide === bowlSide;
-  const canImpact = sd && !sd.impactUsed && sd.bench.length > 0;
-  const unusedXI = sd ? sd.xi.map((p, i) => ({ p, i })).filter(({ i }) => !sd.used[i]) : [];
-  const bowlerRows = imBowl ? wT.xi.map((p, i) => ({ p, i, b: inn.bowlers[i]?.b || 0, sk: bowlSkill(S, bowlSide, i) })) : [];
+  const striker = inn.batters[inn.striker];
+  const bowlerRows = step === 'bowler' && iReq ? wT.xi.map((p, i) => ({ p, i, b: inn.bowlers[i]?.b || 0, sk: bowlSkill(S, bowlSide, i) })) : [];
   const bestBowler = bowlerRows.filter((x) => x.b < MAX_BOWL_BALLS && x.i !== inn.last).sort((a, b) => b.sk - a.sk)[0]?.i;
   const chosenBowler = bowler ?? bestBowler;
-  const waiting = myChoice && <p className="rounded bg-green-600/20 p-2 text-center text-sm">✅ Locked in — waiting for the other side… {secs != null && <span className="text-slate-300">({secs}s)</span>}</p>;
+  const decided = iReq && myChoice && (step === 'ball' ? myChoice.shot !== undefined : Number.isInteger(myChoice.bowler));
+  const canImpact = sd && !sd.impactUsed && sd.bench.length > 0;
+  const PLANS = [['hunt', '🎯 Hunt wickets', 'More wickets, more boundaries'], ['balanced', '⚖ Balanced', 'Standard'], ['tight', '🧱 Tight', 'Fewer boundaries and fewer wickets']];
+  const SHOTBTN = [[1, 'ONE', ''], [2, 'TWO', ''], [4, 'FOUR', 'sky'], [6, 'SIX', 'purple'], [0, 'BLOCK', 'dim']];
+
+  const impactPanel = canImpact && (<div className="rounded-xl border border-white/10 bg-black/20 p-2 text-sm"><label className="flex items-center gap-2"><input type="checkbox" checked={impOpen} onChange={(e) => setImpOpen(e.target.checked)} /> ⚡ Impact Player — swap <b>any</b> XI player with <b>any</b> backup (once per match)</label>
+    {impOpen && <div className="mt-2 grid gap-2 sm:grid-cols-2">
+      <select className="inp py-1 text-sm" value={imp.out} onChange={(e) => setImp({ ...imp, out: e.target.value })}><option value="">Take out…</option>{sd.xi.map((p, i) => { const here = mySide === batSide ? (i === inn.striker ? ' · on strike' : i === inn.non ? ' · non-striker' : '') : (cur && i === cur.bowler ? ' · bowling now' : ''); return <option key={i} value={i}>#{i + 1} {p.name} ({SHORT[p.role]} {p.rt}){here}</option>; })}</select>
+      <select className="inp py-1 text-sm" value={imp.in} onChange={(e) => setImp({ ...imp, in: e.target.value })}><option value="">Bring in…</option>{sd.bench.map((p, i) => <option key={i} value={i}>{p.name} ({SHORT[p.role]} {p.rt})</option>)}</select>
+      {!iReq && <button disabled={sending || imp.out === '' || imp.in === ''} onClick={() => send({ impact: { out: +imp.out, in: +imp.in } })} className="btn bg-amber-400 py-1 text-black sm:col-span-2">⚡ Swap now</button>}
+      {iReq && <p className="text-xs text-slate-400 sm:col-span-2">The swap happens when you lock in below.</p>}</div>}</div>);
 
   return (<div className="space-y-4"><div>{Back}</div>{Header}
     <div className="flex gap-2">{[['live', 'Live'], ['card', 'Scorecard'], ['overs', 'Overs']].map(([k, l]) => <button key={k} onClick={() => setTab(k)} className={`tab-pill ${tab === k ? 'tab-on' : ''}`}>{l}</button>)}</div>
@@ -172,26 +187,41 @@ export function MatchView({ m, mine, FR, now, back, reload, setMsg, msg }) {
         <div className="flex flex-wrap items-center gap-2"><b className="font-display text-2xl uppercase" style={{ color: bT.color }}>{bT.team}</b><span className="score text-3xl font-extrabold">{inn.runs}/{inn.wkts}</span><span className="text-slate-300">({oversText(inn.balls)} ov)</span>
           <span className="ml-auto text-sm text-slate-300">CRR {crr.toFixed(2)}</span></div>
         {ci ? <p className="rounded bg-amber-400/15 p-2 text-sm text-amber-100">🎯 Need <b>{ci.need}</b> off <b>{ci.left}</b> balls · RRR <b>{ci.rrr.toFixed(2)}</b></p> : <p className="text-sm text-slate-400">Innings 1 · {OVERS} overs</p>}
-        <div className="grid gap-2 sm:grid-cols-2 text-sm">
+        <div className="grid gap-2 text-sm sm:grid-cols-2">
           {[inn.striker, inn.non].map((i, k) => { const b = inn.batters[i]; return <div key={i} className="stat-tile flex justify-between"><span>{b.n}{k === 0 ? ' *' : ''}</span><b>{b.r} <span className="text-xs text-slate-400">({b.b})</span></b></div>; })}</div>
-        {last && <div className="flex flex-wrap items-center gap-1 text-xs text-slate-300">Last over ({last.bowler}, {last.runs} runs{last.w ? `, ${last.w} wkt` : ''}): {last.tok.map((t, i) => <Tok key={i} t={t} />)}</div>}
-        {S.log.slice(-3).map((l, i) => <p key={i} className="text-xs text-slate-400">{l}</p>)}</div>
+        <div className="flex flex-wrap items-center gap-1 text-xs text-slate-300">{cur ? <>Over {inn.over + 1} · <b>{wT.xi[cur.bowler].name}</b> ({PLANS.find((x) => x[0] === cur.plan)[1]}) : </> : <>Over {inn.over + 1} · choosing bowler</>}{cur && cur.tok.map((t, i) => <Tok key={i} t={t} />)}</div>
+        {S.lastBall && <p className="rounded bg-black/30 p-2 text-sm"><Tok t={S.lastBall.tok} /> {S.lastBall.txt}</p>}
+        {S.log.slice(-2).map((l, i) => <p key={i} className="text-xs text-slate-400">{l}</p>)}</div>
 
-      {mySide ? (<div className="card space-y-3"><div className="flex items-center gap-2"><h3 className="mr-auto font-display text-2xl uppercase tracking-wide">Over {inn.over + 1} — {imBat ? 'you are batting' : 'you are bowling'}</h3>{secs != null && <span className={`score text-2xl font-bold ${secs <= 8 ? 'text-red-400' : 'text-amber-400'}`}>{secs}s</span>}</div>
-        {myChoice ? waiting : <>
-          {imBat && <div className="grid gap-2 sm:grid-cols-3">{[['defend', '🛡 Defend', 'Fewer boundaries, fewer wickets'], ['normal', '🏏 Normal', 'Balanced'], ['attack', '🔥 Attack', 'More runs, more wickets risk']].map(([k, l, d]) => <button key={k} onClick={() => setIntent(k)} className={`rounded-xl border p-3 text-left ${intent === k ? 'border-amber-400 bg-amber-400/15' : 'border-white/10 bg-black/20'}`}><b className="font-display text-xl uppercase">{l}</b><br /><span className="text-xs text-slate-400">{d}</span></button>)}</div>}
-          {imBowl && <div className="space-y-1"><p className="text-xs text-slate-400">Pick the bowler for this over (max {MAX_BOWL_BALLS / 6} overs each, not two in a row). Skill = rating × bowling ability — batters bowl badly.</p>
+      {mySide ? (<div className="card space-y-3"><div className="flex items-center gap-2"><h3 className="mr-auto font-display text-2xl uppercase tracking-wide">
+        {step === 'ball' ? (iReq ? `Ball ${cur.legal + 1} — choose your shot` : `Ball ${cur.legal + 1} — the batter is choosing…`) : (iReq ? `Over ${inn.over + 1} — choose your bowler` : `Over ${inn.over + 1} — waiting for the bowler…`)}</h3>
+        {secs != null && <span className={`score text-2xl font-bold ${secs <= 5 ? 'text-red-400' : 'text-amber-400'}`}>{secs}s</span>}</div>
+
+        {step === 'ball' && iReq && !decided && <>
+          <p className="text-xs text-slate-400">Facing <b>{wT.xi[cur.bowler].name}</b> · {striker.n} · pick the shot — the % shows your chance of pulling it off and of getting out.</p>
+          <div className="grid grid-cols-5 gap-2">{SHOTBTN.map(([sh, label, tone]) => { const t = shotTable(S, sh); return (
+            <button key={sh} disabled={sending} onClick={() => send({ shot: sh, ...impactChoice })} className={`rounded-xl border p-2 text-center transition active:scale-95 disabled:opacity-50 ${tone === 'sky' ? 'border-sky-400 bg-sky-500/20' : tone === 'purple' ? 'border-purple-400 bg-purple-500/20' : 'border-white/20 bg-black/30'}`}>
+              <div className="score text-3xl font-extrabold">{sh === 0 ? '0' : sh}</div><div className="text-[10px] font-bold tracking-widest">{label}</div>
+              {t && <div className="mt-1 text-[11px] leading-tight"><span className="text-green-400">✔ {(t.succ * 100).toFixed(0)}%</span><br /><span className="text-red-400">out {(t.out * 100).toFixed(0)}%</span></div>}</button>); })}</div>
+          <p className="text-[11px] text-slate-500">Singles are safe but slow, sixes are risky. If the shot fails you may still get a run or two, or get out.</p></>}
+        {step === 'ball' && iReq && decided && <p className="rounded bg-green-600/20 p-2 text-center text-sm">✅ Shot locked in…</p>}
+        {step === 'ball' && !iReq && <p className="rounded bg-black/30 p-2 text-center text-sm text-slate-300">{cur.legal === 0 && cur.att === 0 ? 'The over is about to start' : 'Watch the ball…'} · Plan: {PLANS.find((x) => x[0] === cur.plan)[1]}</p>}
+
+        {step === 'bowler' && iReq && !decided && <>
+          <div className="grid gap-2 sm:grid-cols-3">{PLANS.map(([k, l, d]) => <button key={k} onClick={() => setPlan(k)} className={`rounded-xl border p-2 text-left ${plan === k ? 'border-amber-400 bg-amber-400/15' : 'border-white/10 bg-black/20'}`}><b className="font-display text-lg uppercase">{l}</b><br /><span className="text-xs text-slate-400">{d}</span></button>)}</div>
+          <div className="space-y-1"><p className="text-xs text-slate-400">Pick the bowler (max {MAX_BOWL_BALLS / 6} overs each, not two in a row). Skill = rating × bowling ability — batters bowl badly.</p>
             {bowlerRows.map(({ p, i, b, sk }) => { const off = b >= MAX_BOWL_BALLS || i === inn.last; return <button key={i} disabled={off} onClick={() => setBowler(i)} className={`flex w-full items-center gap-2 rounded-lg border p-2 text-left text-sm disabled:opacity-35 ${chosenBowler === i ? 'border-amber-400 bg-amber-400/15' : 'border-white/10 bg-black/20'}`}>
               <span className="w-6 text-slate-500">{i + 1}</span><span className="flex-1">{p.name} <span className="text-xs text-slate-400">{SHORT[p.role]}{p.ovs ? ' ✈' : ''}</span>{i === inn.last && <span className="ml-1 text-xs text-slate-500">(bowled last over)</span>}</span>
-              <span className="text-xs text-slate-400">{oversText(b)}/{MAX_BOWL_BALLS / 6} ov</span><b className="w-8 text-right">{sk.toFixed(0)}</b>{bestBowler === i && <span className="text-xs text-green-400">best</span>}</button>; })}</div>}
-          {canImpact && <div className="rounded-xl border border-white/10 bg-black/20 p-2 text-sm"><label className="flex items-center gap-2"><input type="checkbox" checked={impOpen} onChange={(e) => setImpOpen(e.target.checked)} /> ⚡ Use my Impact Player (once per match)</label>
-            {impOpen && <div className="mt-2 grid gap-2 sm:grid-cols-2"><select className="inp py-1 text-sm" value={imp.out} onChange={(e) => setImp({ ...imp, out: e.target.value })}><option value="">Take out…</option>{unusedXI.map(({ p, i }) => <option key={i} value={i}>#{i + 1} {p.name} ({SHORT[p.role]} {p.rt})</option>)}</select>
-              <select className="inp py-1 text-sm" value={imp.in} onChange={(e) => setImp({ ...imp, in: e.target.value })}><option value="">Bring in…</option>{sd.bench.map((p, i) => <option key={i} value={i}>{p.name} ({SHORT[p.role]} {p.rt})</option>)}</select>
-              <p className="text-xs text-slate-400 sm:col-span-2">Only players who haven&apos;t batted or bowled yet can be swapped out.</p></div>}</div>}
-          <button disabled={sending || (imBowl && chosenBowler == null)} onClick={() => send(imBat ? { intent, ...impactChoice } : { bowler: chosenBowler, ...impactChoice })} className="btn w-full bg-amber-400 py-3 font-display text-2xl uppercase text-black">🔒 Lock in over {inn.over + 1}</button>
-          <p className="text-xs text-slate-500">If you don&apos;t lock in before the clock ends, the AI picks for you.</p></>}
+              <span className="text-xs text-slate-400">{oversText(b)}/{MAX_BOWL_BALLS / 6} ov</span><b className="w-8 text-right">{sk.toFixed(0)}</b>{bestBowler === i && <span className="text-xs text-green-400">best</span>}</button>; })}</div>
+          <button disabled={sending || chosenBowler == null} onClick={() => send({ bowler: chosenBowler, plan, ...impactChoice })} className="btn w-full bg-amber-400 py-3 font-display text-2xl uppercase text-black">🔒 Bowl over {inn.over + 1}</button></>}
+        {step === 'bowler' && iReq && decided && <p className="rounded bg-green-600/20 p-2 text-center text-sm">✅ Bowler locked in…</p>}
+        {step === 'bowler' && !iReq && <p className="rounded bg-black/30 p-2 text-center text-sm text-slate-300">{wT.team} are choosing their bowler…</p>}
+
+        {!(iReq && decided) && impactPanel}
+        {myChoice && !iReq && myChoice.impact && <p className="text-xs text-green-300">⚡ Impact swap queued — it happens at the next ball.</p>}
+        {!iReq && !impactPanel && <p className="text-xs text-slate-500">Your impact player has been used.</p>}
         {msg && <p className="text-sm text-red-300">{msg}</p>}</div>)
-        : <p className="card text-center text-slate-300">👀 You are watching. Over {inn.over + 1}: {bT.team} batting, {wT.team} bowling.</p>}
+        : <p className="card text-center text-slate-300">👀 You are watching. {bT.team} batting, {wT.team} bowling.</p>}
     </>}
   </div>);
 }
@@ -199,7 +229,7 @@ export function MatchView({ m, mine, FR, now, back, reload, setMsg, msg }) {
 function OverList({ S }) {
   return <div className="space-y-3">{S.innings.map((inn, k) => <div key={k} className="card space-y-1"><h3 className="font-display text-xl uppercase tracking-wide">{S.sides[inn.bat].team} innings</h3>
     {inn.overs.length === 0 && <p className="text-xs text-slate-500">No overs yet.</p>}
-    {inn.overs.map((o) => <div key={o.n} className="flex flex-wrap items-center gap-2 border-b border-white/5 py-1 text-sm"><span className="w-12 text-slate-400">Ov {o.n}</span><span className="w-32 truncate">{o.bowler}</span><span className="flex flex-wrap gap-1">{o.tok.map((t, i) => <Tok key={i} t={t} />)}</span><b className="ml-auto">{o.runs}{o.w ? ` · ${o.w}W` : ''}</b></div>)}</div>)}</div>;
+    {inn.overs.map((o) => <div key={o.n} className="flex flex-wrap items-center gap-2 border-b border-white/5 py-1 text-sm"><span className="w-12 text-slate-400">Ov {o.n}</span><span className="w-32 truncate">{o.bowler}{o.plan ? <span className="ml-1 text-[10px] text-slate-500">{o.plan === 'hunt' ? '🎯' : o.plan === 'tight' ? '🧱' : '⚖'}</span> : null}</span><span className="flex flex-wrap gap-1">{o.tok.map((t, i) => <Tok key={i} t={t} />)}</span><b className="ml-auto">{o.runs}{o.w ? ` · ${o.w}W` : ''}</b></div>)}</div>)}</div>;
 }
 
 function Scorecards({ S }) {
