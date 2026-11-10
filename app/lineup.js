@@ -17,7 +17,7 @@ export const blankLineup = () => ({ slots: DEFAULT_WANTS.map((want) => ({ want, 
 // game estimate of a player's quality from the base-price tier (same formula the Final tab uses)
 export const baseRating = (rp, p) => { const b = rp.base_lakh; const r = b >= 200 ? 90 : b >= 150 ? 80 : b >= 125 ? 75 : b >= 100 ? 70 : b >= 75 ? 62 : b >= 50 ? 52 : b >= 40 ? 46 : 40; return Math.min(99, r + (p.capped === 'Capped' ? 3 : 0)); };
 
-const normalize = (row) => {
+export const normalize = (row) => {
   if (!row || !Array.isArray(row.slots) || row.slots.length !== 11) return blankLineup();
   return {
     slots: row.slots.map((s, i) => ({ want: WANTS.includes(s?.want) ? s.want : DEFAULT_WANTS[i], pid: Number.isInteger(s?.pid) ? s.pid : null })),
@@ -337,14 +337,18 @@ export function QuickSlot({ xi, p }) {
 }
 
 // ---------- Final tab: every team's XI with C / VC / backups ----------
+// the XI a franchise would field: its saved lineup if visible, otherwise an auto-picked one from its squad
+export function buildTeamXI(f, row, rps, P) {
+  const owned = rps.filter((r) => r.status === 'sold' && r.sold_to === f.id && P[r.player_id])
+    .map((r) => ({ pid: r.player_id, p: P[r.player_id], rp: r, r: baseRating(r, P[r.player_id]) + r.sold_lakh / 100000 }));
+  const ids = new Set(owned.map((o) => o.pid));
+  const stateOf = (pid) => (pid == null ? { k: 'empty' } : ids.has(pid) ? { k: 'owned' } : { k: 'lost' });
+  if (row) return { lu: normalize(row), kind: row.locked ? 'locked' : 'draft', owned, stateOf };
+  return { lu: autoFill(blankLineup(), owned, stateOf, P), kind: f.is_bot ? 'bot' : 'auto', owned, stateOf };
+}
+
 function XiCard({ f, row, rps, P, FR }) {
-  const owned = useMemo(() => rps.filter((r) => r.status === 'sold' && r.sold_to === f.id && P[r.player_id])
-    .map((r) => ({ pid: r.player_id, p: P[r.player_id], rp: r, r: baseRating(r, P[r.player_id]) + r.sold_lakh / 100000 })), [rps, P, f.id]);
-  const stateOf = (pid) => (pid == null ? { k: 'empty' } : rps.find((r) => r.player_id === pid && r.sold_to === f.id && r.status === 'sold') ? { k: 'owned' } : { k: 'lost' });
-  const [lu, kind] = useMemo(() => {
-    if (row) return [normalize(row), row.locked ? 'locked' : 'draft'];
-    return [autoFill(blankLineup(), owned, stateOf, P), f.is_bot ? 'bot' : 'auto'];
-  }, [row, owned]);
+  const { lu, kind, stateOf } = useMemo(() => buildTeamXI(f, row, rps, P), [f, row, rps, P]);
   const badge = kind === 'locked' ? ['🔒 Finalised', 'bg-green-600/30'] : kind === 'draft' ? ['📝 Draft (not locked)', 'bg-amber-400/20'] : kind === 'bot' ? ['🤖 Auto-picked', 'bg-white/10'] : ['⚙ No XI submitted — auto-picked', 'bg-white/10'];
   const ok = (pid) => pid != null && stateOf(pid).k === 'owned' && P[pid];
   const os = lu.slots.filter((s) => ok(s.pid) && P[s.pid].overseas).length;

@@ -4,6 +4,8 @@ import { sb, ensureUser, cr, setLabel } from '../../../lib/supabase';
 import { Logo } from '../../components';
 import { squadImage, leaderboardImage, shareBlob } from '../../shareimage';
 import { useLineup, XiMini, XiEditor, XiShowcase, QuickSlot, baseRating } from '../../lineup';
+import { LeagueTab } from '../../league';
+import { MatchTab } from '../../match';
 
 const inc = (c) => (c < 100 ? 5 : c < 200 ? 10 : c < 500 ? 20 : 25);
 const wikiCache = {};
@@ -134,7 +136,7 @@ function Upcoming({ rps, P, cur, isHost, act, watchSet, mine }) {
     <ul className="max-h-56 divide-y divide-white/10 overflow-y-auto text-sm">{list.map((x) => { const p = P[x.player_id]; return <li key={x.id} className={`flex justify-between py-1 ${watchSet && watchSet.has(x.player_id) ? 'bg-yellow-300/10' : ''}`}><span>{mine && <button title="Watchlist" onClick={() => act('toggle_watch', { p_player: x.player_id })} className="mr-1 text-yellow-300">{watchSet && watchSet.has(x.player_id) ? '★' : '☆'}</button>}{p?.name} <span className="text-slate-400">{p?.country}</span></span><span className="flex items-center gap-2">{cr(x.base_lakh)}{isHost && x.status === 'pending' && <button title="Bots sit out this player" onClick={() => act('host_bots_skip', { p_rp: x.id, p_skip: !x.bots_skip })} className={`rounded px-1 text-xs ${x.bots_skip ? 'bg-red-500/70' : 'bg-white/10'}`}>{x.bots_skip ? '🚫🤖' : '🤖'}</button>}</span></li>; })}
       {by(active).length > 15 && <li className="py-1 text-slate-400">+{by(active).length - 15} more…</li>}</ul></div>);
 }
-const TABS = ['Live', 'Results Table', 'My Franchise', 'My XI', 'All Teams', 'Final'];
+const TABS = ['Live', 'Results Table', 'My Franchise', 'My XI', 'All Teams', 'Final', 'League', 'Arena'];
 
 // ---------- sound effects (synthesised in the browser, no audio files) ----------
 let _ctx;
@@ -317,6 +319,8 @@ export default function Room({ params }) {
     {tab === 'Results Table' && <Table {...{ rps, P, FR, fr, isHost, act, room }} />}
     {tab === 'My Franchise' && (mine ? <Squad f={mine} room={room} rps={rps} P={P} /> : <p className="card">You are watching as a spectator.</p>)}
     {tab === 'My XI' && (mine ? <XiEditor {...{ xi, room, rps, P, FR, watch }} /> : <p className="card">You are watching as a spectator.</p>)}
+    {tab === 'League' && <LeagueTab {...{ fr, lus, rps, P, room, mine }} />}
+    {tab === 'Arena' && <MatchTab {...{ fr, lus, rps, P, room, mine }} />}
     {tab === 'All Teams' && <div className="grid gap-4 md:grid-cols-2">{fr.map((f) => <Squad key={f.id} f={f} room={room} rps={rps} P={P} />)}</div>}
     {tab === 'Final' && <Final {...{ rps, P, FR, fr, room, lus, mine }} />}
   </div>);
