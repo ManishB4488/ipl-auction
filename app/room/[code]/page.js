@@ -168,6 +168,38 @@ const sfx = {
   unsold: () => { tone(300, 0.25, 'sawtooth', 0.08); tone(220, 0.45, 'sawtooth', 0.08, 0.22); },
 };
 
+// Replaceable audio: put URLs of recorded clips here (null = built-in synthesised sound) and swap ANNOUNCER.speak for a recorded voice later.
+const AUDIO_CLIPS = { paddle: null, gavel: null, cheer: null, sold: null };
+const ANNOUNCER = { speak(text) {
+  try {
+    const sp = window.speechSynthesis; if (!sp) return;
+    sp.cancel(); const u = new SpeechSynthesisUtterance(text); u.rate = 1.05; u.pitch = 0.85; u.lang = 'en-IN';
+    const vs = sp.getVoices(); const v = vs.find((x) => /en[-_]IN/i.test(x.lang)) || vs.find((x) => /^en/i.test(x.lang)); if (v) u.voice = v;
+    sp.speak(u);
+  } catch (e) {}
+} };
+const words = (l) => { const c = Math.floor(l / 100), r = l % 100; return [c ? `${c} crore` : '', r ? `${r} lakh` : ''].filter(Boolean).join(' ') || 'zero'; };
+function noiseBurst(dur, f, v, when = 0) {
+  const c = unlockAudio(); if (!c) return;
+  const t0 = c.currentTime + when, len = Math.floor(c.sampleRate * dur), buf = c.createBuffer(1, len, c.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.sin((i / len) * Math.PI);
+  const n = c.createBufferSource(), flt = c.createBiquadFilter(), g = c.createGain(); n.buffer = buf; flt.type = 'bandpass'; flt.frequency.value = f; flt.Q.value = 0.7;
+  g.gain.value = v; n.connect(flt); flt.connect(g); g.connect(c.destination); n.start(t0);
+}
+sfx.paddle = () => { noiseBurst(0.12, 2600, 0.18); tone(900, 0.05, 'triangle', 0.05); };
+sfx.cheer = () => { noiseBurst(1.8, 1500, 0.2); noiseBurst(1.3, 700, 0.16, 0.12); };
+let _amb = null;
+function ambience(on) {   // quiet crowd murmur while the auction is live
+  const c = unlockAudio(); if (!c) return;
+  if (on && !_amb) {
+    const len = c.sampleRate * 3, buf = c.createBuffer(1, len, c.sampleRate), d = buf.getChannelData(0); let last = 0;
+    for (let i = 0; i < len; i++) { last = (last + 0.03 * (Math.random() * 2 - 1)) / 1.03; d[i] = last * 4; }
+    const src = c.createBufferSource(), flt = c.createBiquadFilter(), g = c.createGain(); src.buffer = buf; src.loop = true; flt.type = 'lowpass'; flt.frequency.value = 650; g.gain.value = 0.05;
+    src.connect(flt); flt.connect(g); g.connect(c.destination); src.start(); _amb = { src, g };
+  } else if (!on && _amb) { try { _amb.src.stop(); } catch (e) {} _amb = null; }
+}
+const ageOf = (p) => { const m = (p.dob || '').split('/'); if (m.length !== 3) return null; return Math.floor((Date.now() - new Date(+m[2], +m[1] - 1, +m[0])) / 31557600000); };
+
 function SoldOverlay({ m, P, FR, onClose }) {
   const sold = m.status === 'sold', team = FR[m.sold_to], p = P[m.player_id];
   const bits = useMemo(() => Array.from({ length: 36 }, (_, i) => ({ left: Math.random() * 100, delay: Math.random() * 1.2, dur: 2.2 + Math.random() * 2, color: [team?.color || '#fbbf24', '#fbbf24', '#ffffff'][i % 3] })), [m.id]);
@@ -257,7 +289,8 @@ export default function Room({ params }) {
     window.addEventListener('pointerdown', unlock, { once: true });
     return () => window.removeEventListener('pointerdown', unlock);
   }, []);
-  const play = (n) => { if (soundRef.current) sfx[n](); };
+  const play = (n) => { if (!soundRef.current) return; if (AUDIO_CLIPS[n]) { try { new Audio(AUDIO_CLIPS[n]).play(); } catch (e) {} } else if (sfx[n]) sfx[n](); };
+  const speak = (t) => { if (soundRef.current) ANNOUNCER.speak(t); };
   const toggleSound = () => {
     const v = !soundRef.current; soundRef.current = v; setSound(v);
     try { localStorage.setItem('auction-sound', v ? 'on' : 'off'); } catch (e) {}
@@ -270,10 +303,29 @@ export default function Room({ params }) {
     if (seenSale.current === null) { seenSale.current = t; return; }
     if (t > seenSale.current) {
       seenSale.current = t; setMoment(lastRes); play(lastRes.status === 'sold' ? 'sold' : 'unsold');
+      const sp = P[lastRes.player_id], tm = FR[lastRes.sold_to];
+      if (lastRes.status === 'sold') { setTimeout(() => play('cheer'), 350); speak(`Sold! ${sp?.name || 'The player'} goes to ${tm?.team || 'a team'} for ${words(lastRes.sold_lakh)}.`); } else speak(`${sp?.name || 'The player'} goes unsold.`);
       if (momentTimer.current) clearTimeout(momentTimer.current);
       momentTimer.current = setTimeout(() => setMoment(null), 4500);
     }
   }, [rps, room]);
+
+  const seenLot = useRef(undefined), seenBid = useRef(undefined);
+  useEffect(() => {   // announcer: new player on the block (only real room changes; nothing on first load)
+    if (!room) return;
+    const key = room.status === 'live' ? room.cur_rp : null;
+    if (seenLot.current === undefined) { seenLot.current = key; return; }
+    if (key && key !== seenLot.current && cur) { const p = P[cur.player_id]; if (p) speak(`Next player. ${p.name}. ${p.role}${p.overseas ? ` from ${p.country}` : ''}. Base price ${words(cur.base_lakh)}.`); }
+    seenLot.current = key;
+  }, [room?.cur_rp, room?.status]);
+  useEffect(() => {   // a server-accepted bid: paddle sound + announcement
+    if (!room) return;
+    const key = room.cur_bidder ? room.cur_bidder + ':' + room.cur_bid : null;
+    if (seenBid.current === undefined) { seenBid.current = key; return; }
+    if (key && key !== seenBid.current) { play('paddle'); const t = FR[room.cur_bidder]?.team; if (t) speak(`${words(room.cur_bid)}, ${t}`); }
+    seenBid.current = key;
+  }, [room?.cur_bidder, room?.cur_bid]);
+  useEffect(() => { ambience(sound && room?.status === 'live'); return () => ambience(false); }, [sound, room?.status === 'live']);
 
   useEffect(() => {   // keep the phone screen awake while the auction runs (bots and timers need an open screen)
     const on = room && (room.status === 'live' || room.status === 'paused' || room.status === 'accel_pick');
@@ -309,7 +361,6 @@ export default function Room({ params }) {
   if (room.status === 'lobby') return <Lobby {...{ room, fr, isHost, mine, act, link, msg, setMsg, pin }} />;
 
   return (<div className="space-y-4">
-    {moment && <SoldOverlay m={moment} P={P} FR={FR} onClose={() => setMoment(null)} />}
     <div className="flex flex-wrap items-center gap-2">
       <h1 className="mr-auto font-display text-3xl font-extrabold uppercase">{room.name} <span className="font-sans text-sm font-normal normal-case text-slate-400">#{room.code} · {room.status.replace('_', ' ').toUpperCase()}</span></h1>
       <button onClick={toggleSound} className="btn bg-white/10 text-sm">{sound ? '🔊 Sound ON' : '🔇 Sound OFF'}</button>
@@ -319,7 +370,7 @@ export default function Room({ params }) {
     </div>
     {msg && <p className="rounded-lg bg-red-500/20 p-2 text-sm">{msg}</p>}
     {!mine && <p className="rounded-lg bg-white/10 p-2 text-sm">You are watching as a spectator. Are you a player? <a className="text-amber-400 underline" href={`/rejoin?code=${code}`}>Rejoin with your PIN</a></p>}
-    {tab === 'Live' && (room.status === 'accel_pick' ? <AccelPick {...{ room, fr, rps, P, mine, isHost, act }} /> : <Live {...{ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act, autos, watch, play, xi, setTab }} />)}
+    {tab === 'Live' && (room.status === 'accel_pick' ? <AccelPick {...{ room, fr, rps, P, mine, isHost, act }} /> : <Live {...{ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act, autos, watch, play, speak, moment, xi, setTab }} />)}
     {tab === 'Results Table' && <Table {...{ rps, P, FR, fr, isHost, act, room }} />}
     {tab === 'My Franchise' && (mine ? <Squad f={mine} room={room} rps={rps} P={P} /> : <p className="card">You are watching as a spectator.</p>)}
     {tab === 'My XI' && (mine ? <XiEditor {...{ xi, room, rps, P, FR, watch }} /> : <p className="card">You are watching as a spectator.</p>)}
@@ -352,8 +403,9 @@ function Lobby({ room, fr, isHost, act, link, msg, mine, pin }) {
       {msg && <p className="text-sm text-red-400">{msg}</p>}</div>}</div>);
 }
 
-function Live({ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act, autos, watch, play, xi, setTab }) {
-  const [rt, setRt] = useState('xi');   // right-hand panel tab
+function Live({ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act, autos, watch, play, speak, moment, xi, setTab }) {
+  const [rt, setRt] = useState(mine ? 'xi' : 'bids');   // right-hand panel tab
+  const [fs, setFs] = useState(false), [panelOpen, setPanelOpen] = useState(true), [hostOpen, setHostOpen] = useState(false), wrapRef = useRef(null);
   const watchSet = new Set(watch.map((w) => w.player_id));
   const p = cur && P[cur.player_id];
   const wiki = useWiki(p ? p.name : '');   // photo for the 3D LED screen
@@ -371,59 +423,93 @@ function Live({ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act, autos,
   useEffect(() => {   // sound for the calls (only when someone has bid)
     if (call === lastCall.current) return;
     lastCall.current = call;
-    if (call === 'Going once…') play('once'); else if (call === 'Going twice…') play('twice'); else if (call === 'FINAL CALL…') play('final');
+    if (call === 'Going once…') { play('once'); speak('Going once'); } else if (call === 'Going twice…') { play('twice'); speak('Going twice'); } else if (call === 'FINAL CALL…') { play('final'); speak('Final call'); }
   }, [call]);
   const done = rps.filter((x) => x.status === 'sold' || x.status === 'unsold').length;
   const total = rps.length, sold = rps.filter((x) => x.status === 'sold').length;
   const myBids = bids.filter((b) => cur && b.rp_id === cur.id);
   // 3D auction room: driven only by authoritative room state (cur_bidder / cur_bid / last sale), never by button clicks
+  const RTABS = [['xi', '📋 My XI'], ['bids', '🔨 Bids'], ['teams', 'Teams'], ['queue', 'Queue']];
   const live = room.status === 'live' || room.status === 'paused';
   const hi = live && room.cur_bidder ? FR[room.cur_bidder] : null;
-  const panel = p ? (<div className="flex items-center gap-2 rounded-xl border border-white/15 bg-black/70 px-2 py-1.5 backdrop-blur sm:gap-3 sm:px-3">
-    <Photo name={p.name} size={44} />
-    <div className="min-w-0"><div className="max-w-[120px] truncate font-display text-sm font-bold uppercase leading-tight sm:max-w-[200px] sm:text-xl">{p.name}</div><div className="text-[10px] text-slate-300 sm:text-xs">{p.role} · Base {cr(cur.base_lakh)}</div></div>
-    <div className="text-right"><div className="text-[9px] uppercase tracking-widest text-slate-400">Current bid</div><div className="score text-lg font-extrabold text-amber-400 sm:text-2xl">{hi ? cr(room.cur_bid) : '—'}</div><div className="max-w-[90px] truncate text-[10px] sm:max-w-[140px] sm:text-xs" style={{ color: hi?.color }}>{hi ? hi.team : 'No bids yet'}</div></div></div>) : null;
+  const unsoldN = rps.filter((x) => x.status === 'unsold').length, pendingN = rps.filter((x) => x.status === 'pending').length;
+  const lotNo = done + (cur ? 1 : 0);
+  const age = p ? ageOf(p) : null;
+  const stats = p ? [age != null && `Age ${age}`, p.bat === 'RHB' ? 'Right-hand bat' : p.bat === 'LHB' ? 'Left-hand bat' : null, p.bowl ? `Bowls ${p.bowl.toLowerCase()}` : null,
+    p.ipl_team_2025 ? `IPL 2025: ${p.ipl_team_2025}${p.ipl_matches != null ? ` · ${p.ipl_matches} M` : ''}` : null, p.retained ? '⭐ Retained star' : null].filter(Boolean) : [];
+  // LED screen data: everything comes from the authoritative room state, never from button clicks
+  const screen = p ? { name: p.name, photo: wiki.src || '', role: p.role, country: p.country, overseas: !!p.overseas, capped: p.capped, base: cur.base_lakh, bid: room.cur_bid, bidder: hi ? hi.team : '', bidderColor: hi ? hi.color : '',
+    stats, secs: room.status === 'live' && cur ? Math.ceil(left / 1000) : null, paused: room.status === 'paused', lot: `LOT ${lotNo} / ${total}` } : null;
+  const sale = last ? { key: String(last.sold_at || last.id), status: last.status, fid: last.sold_to, player: P[last.player_id]?.name || '', team: FR[last.sold_to]?.team || '', price: last.sold_lakh, color: FR[last.sold_to]?.color || '#22c55e' } : null;
+  const toggleFs = () => {
+    const on = !fs; setFs(on);
+    try { if (on && wrapRef.current && wrapRef.current.requestFullscreen) wrapRef.current.requestFullscreen().catch(() => {}); else if (!on && document.fullscreenElement) document.exitFullscreen(); } catch (e) {}
+  };
+  useEffect(() => { const f = () => { if (!document.fullscreenElement) setFs(false); }; document.addEventListener('fullscreenchange', f); return () => document.removeEventListener('fullscreenchange', f); }, []);
+
+  // ---- broadcast overlays on the arena ----
+  const tvBtn = 'pointer-events-auto rounded bg-black/65 px-2 py-1 text-xs font-bold backdrop-blur hover:bg-black/85';
+  const topbar = (<div className="pointer-events-none flex flex-wrap items-center gap-2">
+    <span className={`rounded px-2 py-1 text-xs font-extrabold tracking-widest ${room.status === 'live' ? 'bg-red-600 text-white' : room.status === 'paused' ? 'bg-amber-400 text-black' : 'bg-white/20'}`}>{room.status === 'live' ? '● LIVE' : room.status === 'paused' ? '⏸ PAUSED' : room.status.toUpperCase()}</span>
+    <span className="hidden rounded bg-black/65 px-2 py-1 text-xs font-bold uppercase tracking-widest backdrop-blur sm:inline">IPL 2026 · Mega Auction</span>
+    <span className="rounded bg-black/65 px-2 py-1 text-xs font-bold backdrop-blur">LOT {lotNo} / {total}</span>
+    <button className={tvBtn} onClick={() => setPanelOpen(!panelOpen)}>{panelOpen ? '⟩ Hide panel' : '⟨ Show panel'}</button>
+    <button className={tvBtn} onClick={toggleFs}>{fs ? '⤡ Exit full screen' : '⤢ Full screen'}</button></div>);
+  const isSold = moment && moment.status === 'sold';
+  const lower = moment && (moment.status === 'sold' || moment.status === 'unsold') ? (
+    <div key={moment.id} className="pop flex items-center gap-3 rounded-xl border-l-8 bg-[#071033]/95 px-4 py-2 shadow-2xl" style={{ borderColor: isSold ? '#22c55e' : '#ef4444' }}>
+      <div className={`font-display text-3xl font-black sm:text-4xl ${isSold ? 'text-green-400' : 'text-red-400'}`}>{isSold ? 'SOLD!' : 'UNSOLD'}</div>
+      {isSold && <Logo team={FR[moment.sold_to]?.team} size={44} />}
+      <div className="min-w-0"><div className="max-w-[260px] truncate font-display text-lg uppercase leading-tight sm:text-xl">{P[moment.player_id]?.name}</div>
+        {isSold && <div className="text-sm" style={{ color: FR[moment.sold_to]?.color }}>{FR[moment.sold_to]?.team} · <b className="text-amber-300">{cr(moment.sold_lakh)}</b></div>}</div></div>
+  ) : p ? (
+    <div className="flex items-stretch overflow-hidden rounded-xl border border-white/10 bg-[#071033]/90 shadow-2xl backdrop-blur">
+      <div className="flex items-center gap-3 border-l-4 border-amber-400 px-3 py-2"><Photo name={p.name} size={52} />
+        <div className="min-w-0"><div className="max-w-[240px] truncate font-display text-xl font-extrabold uppercase leading-tight">{p.name}</div><div className="text-xs text-slate-300">{p.role} · {p.overseas ? `✈ ${p.country}` : '🇮🇳 Indian'} · Base {cr(cur.base_lakh)}</div></div></div>
+      <div className="flex items-center gap-3 px-4 py-2" style={{ background: hi ? `${hi.color}33` : 'transparent' }}>{hi && <Logo team={hi.team} size={40} />}
+        <div><div className="text-[10px] uppercase tracking-widest text-slate-400">{hi ? 'Highest bid' : 'Opens at'}</div><div className="score text-3xl font-extrabold leading-none text-amber-400">{hi ? cr(room.cur_bid) : cr(cur.base_lakh)}</div><div className="max-w-[170px] truncate text-xs" style={{ color: hi?.color }}>{hi ? hi.team : 'No bids yet'}</div></div></div></div>
+  ) : null;
   const controls = p ? (<div className="pointer-events-auto flex items-center gap-2 rounded-2xl border border-white/15 bg-black/75 px-2 py-1.5 backdrop-blur">
-    <div className={`score grid h-12 w-12 place-items-center rounded-full border-4 text-2xl font-extrabold tabular-nums ${left < 5000 ? 'animate-pulse border-red-500 text-red-400' : 'border-amber-400 text-amber-400'}`}>{Math.ceil(left / 1000)}</div>
+    <div className={`score grid h-12 w-12 place-items-center rounded-full border-4 text-2xl font-extrabold tabular-nums ${left < 5000 ? 'animate-pulse border-red-500 text-red-400' : 'border-amber-400 text-amber-400'}`}>{room.status === 'paused' ? '⏸' : Math.ceil(left / 1000)}</div>
     {call && <div key={call} className="pop hidden rounded-lg bg-amber-400/20 px-2 py-1 text-sm font-extrabold text-amber-300 sm:block">🔨 {call}</div>}
     {mine && room.status === 'live' && <><button disabled={room.cur_bidder === mine.id} onClick={() => act('bid', { p_amount: next })} className="btn bg-amber-400 px-4 py-2 font-display text-xl uppercase text-black sm:text-2xl">Bid {cr(next)}</button><button onClick={() => act('pass')} className="btn bg-white/10 px-3 py-2">PASS</button></>}
-  </div>) : null;   // same handlers as the buttons in the card below: the server still validates every bid
-  const screen = p ? { name: p.name, photo: wiki.src || '', role: p.role, country: p.country, base: cur.base_lakh, bid: room.cur_bid, bidder: hi ? hi.team : '', bidderColor: hi ? hi.color : '' } : null;
-  const stage = <BidderStage teams={fr.map((f, i) => ({ id: f.id, name: f.team, color: f.color || '#ff8a1f', no: i + 1, owner: f.owner || '', purse: room.purse_lakh - (f.spent_lakh || 0), squad: f.squad_count || 0 }))} curBidder={hi ? hi.id : null} curBid={room.cur_bid || 0} saleKey={last ? String(last.sold_at || last.id) : ''} screen={screen} panel={panel} controls={controls} className="h-[460px] sm:h-[520px] lg:h-[min(calc(100vh-120px),820px)] lg:min-h-[520px]" />;
-  const RTABS = [['xi', '📋 My XI'], ['bids', '🔨 Bids'], ['teams', 'Teams'], ['queue', 'Queue']];
-  const unsoldN = rps.filter((x) => x.status === 'unsold').length, pendingN = rps.filter((x) => x.status === 'pending').length;
+  </div>) : null;   // same handlers as before: the server still validates every bid
+  const stageCls = fs ? 'h-[calc(100vh-1rem)]' : 'h-[460px] sm:h-[520px] lg:h-[calc(100vh-110px)] lg:min-h-[560px]';
+  const asideCls = fs ? 'lg:h-[calc(100vh-1rem)]' : 'lg:h-[calc(100vh-110px)] lg:min-h-[560px]';
+  const stage = <BidderStage teams={fr.map((f, i) => ({ id: f.id, name: f.team, color: f.color || '#ff8a1f', no: i + 1, owner: f.owner || '', purse: room.purse_lakh - (f.spent_lakh || 0), squad: f.squad_count || 0 }))}
+    curBidder={hi ? hi.id : null} curBid={room.cur_bid || 0} sale={sale} screen={screen} topbar={topbar} panel={lower} controls={controls} className={stageCls} />;
+  const ARENA_CSS = '.arena-scroll{color-scheme:dark;scrollbar-width:thin;scrollbar-color:rgba(255,138,31,.5) transparent}.arena-scroll::-webkit-scrollbar{width:6px}.arena-scroll::-webkit-scrollbar-track{background:transparent}.arena-scroll::-webkit-scrollbar-thumb{background:rgba(255,138,31,.5);border-radius:6px}';
   const hb = (label, title, onClick, cls = 'bg-white/10') => <button title={title} onClick={onClick} className={`btn px-2 py-1 text-xs ${cls}`}>{label}</button>;
-  const hostBox = isHost && <div className="card shrink-0 !p-2"><div className="mb-1 font-display text-sm font-bold uppercase text-amber-400">Host controls{room.status === 'paused' ? ' · ⏸ PAUSED' : ''}</div>
-    <div className="flex flex-wrap gap-1">
-      {room.status === 'live' && hb('⏸ Pause', 'Pause the auction', () => act('host_pause'))}
-      {room.status === 'paused' && hb('▶ Resume', 'Resume the auction', () => act('host_resume'), 'bg-green-500 text-black')}
-      {hb('⏭ Skip', 'Skip to end of queue', () => act('host_skip'))}
-      {hb('Mark UNSOLD', 'Mark this player unsold', () => act('host_unsold'))}
-      {hb('↩ Undo sale', 'Undo the last completed sale', () => confirm('Undo the last completed sale?') && act('host_undo_sale'))}
-      {hb(`🤖 Bots ${room.fill_bots ? 'ON' : 'OFF'}`, 'Toggle bots', () => act('host_bots', { p_on: !room.fill_bots }), room.fill_bots ? 'bg-white/10' : 'bg-red-500/70')}
-      {cur && hb(cur.bots_skip ? '🚫🤖 Sitting out (undo)' : '🚫🤖 Bots sit out', 'Bots sit out this player', () => act('host_bots_skip', { p_rp: cur.id, p_skip: !cur.bots_skip }), cur.bots_skip ? 'bg-red-500/70' : 'bg-white/10')}
-      {room.status === 'review' && hb('Re-auction unsold', 'Re-auction unsold players', () => act('host_reauction'), 'bg-amber-400 text-black')}
-      {hb('End auction', 'End the auction', () => confirm('End the auction?') && act('host_end'), 'bg-red-500/70')}</div></div>;
-  return (<div className="grid gap-3 lg:relative lg:left-1/2 lg:w-[min(96vw,1700px)] lg:-translate-x-1/2 lg:grid-cols-[minmax(0,1fr)_400px]">
-    <div className="min-w-0">{stage}</div>
-    <div className="flex min-w-0 flex-col gap-2 lg:h-[min(calc(100vh-120px),820px)] lg:min-h-[520px]">
-      {/* always visible: result banner, player details, progress */}
-      {last && <div key={last.id} className="pop flex shrink-0 items-center justify-center gap-2 rounded-xl border border-white/10 p-2 text-center font-display text-sm font-bold uppercase tracking-wide" style={{ background: last.status === 'sold' ? `linear-gradient(90deg, ${FR[last.sold_to]?.color || '#16a34a'}99, #16a34a33 70%)` : 'linear-gradient(90deg, #dc262699, #dc262622 70%)' }}><Photo name={P[last.player_id]?.name || '?'} size={32} />
-        <span className="min-w-0 truncate">{last.status === 'sold' ? `🔨 SOLD! ${P[last.player_id]?.name} → ${FR[last.sold_to]?.team} · ${cr(last.sold_lakh)}` : `❌ UNSOLD: ${P[last.player_id]?.name}`}</span></div>}
-      {p ? <details className="card shrink-0 !p-2" style={{ '--glow': FR[room.cur_bidder]?.color || '#ff8a1f' }}>
-        <summary className="flex cursor-pointer list-none items-center gap-2">
-          <Photo name={p.name} size={48} spot />
-          <div className="min-w-0 flex-1"><div className="truncate font-display text-lg font-extrabold uppercase leading-tight">{p.name}</div><div className="text-xs text-slate-300">{p.role} · {p.overseas ? `✈ ${p.country}` : '🇮🇳 Indian'} · Base {cr(cur.base_lakh)}</div></div>
-          {mine && <button type="button" title="Add to watchlist" onClick={(e) => { e.preventDefault(); act('toggle_watch', { p_player: p.id }); }} className="text-2xl text-yellow-300">{watchSet.has(p.id) ? '★' : '☆'}</button>}
-          <span className="text-xs text-slate-400">ℹ</span></summary>
-        <div className="mt-2 max-h-56 overflow-y-auto"><PlayerInfo p={p} rp={cur} room={room} /></div>
-      </details> : <div className="card shrink-0 text-center">{room.status === 'review' ? 'First round finished — host can re-auction unsold players.' : room.status === 'done' ? 'Auction complete! See the Final tab.' : 'Waiting…'}</div>}
-      <div className="card shrink-0 !p-2"><div className="flex items-center gap-2 text-xs text-slate-300"><span className="text-green-400"><b>{sold}</b> sold</span><span className="text-red-400"><b>{unsoldN}</b> unsold</span><span><b>{pendingN}</b> to come</span><span className="ml-auto text-slate-400">{done}/{total}</span></div>
-        <div className="mt-1 h-1.5 rounded-full bg-white/10"><div className="h-1.5 rounded-full bg-gradient-to-r from-amber-300 to-amber-500" style={{ width: `${(done / Math.max(total, 1)) * 100}%` }} /></div></div>
-      {hostBox}
-      {/* tabs */}
-      <div className="flex shrink-0 gap-1 overflow-x-auto">{RTABS.map(([k, l]) => <button key={k} onClick={() => setRt(k)} className={`btn whitespace-nowrap px-3 py-1 text-sm ${rt === k ? 'bg-amber-400 text-black' : 'bg-white/10'}`}>{l}</button>)}</div>
-      <div className="min-h-[300px] flex-1 space-y-3 overflow-y-auto pr-1 lg:min-h-0">
+  const chip = (t, c) => <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${c}`}>{t}</span>;
+
+  // ---- right-hand information panel ----
+  const aside = (<aside className={`flex min-w-0 flex-col gap-2 ${asideCls}`}>
+    {p ? <div className="card shrink-0 !p-3" style={{ borderTop: `3px solid ${hi?.color || '#ff8a1f'}` }}>
+      <div className="flex items-center gap-3"><Photo name={p.name} size={60} spot />
+        <div className="min-w-0 flex-1"><div className="flex items-center gap-1"><span className="truncate font-display text-2xl font-extrabold uppercase leading-tight">{p.name}</span>{mine && <button title="Add to watchlist" onClick={() => act('toggle_watch', { p_player: p.id })} className="text-2xl text-yellow-300">{watchSet.has(p.id) ? '★' : '☆'}</button>}</div>
+          <div className="mt-1 flex flex-wrap gap-1">{chip(p.role.toUpperCase(), 'bg-amber-400 text-black')}{chip(p.overseas ? `✈ ${p.country}` : '🇮🇳 INDIAN', p.overseas ? 'bg-sky-400 text-black' : 'bg-green-500 text-black')}{chip(p.capped === 'Capped' ? 'CAPPED' : 'UNCAPPED', p.capped === 'Capped' ? 'bg-purple-500 text-white' : 'bg-slate-500 text-white')}</div></div>
+        <div className={`score grid h-14 w-14 shrink-0 place-items-center rounded-full border-4 text-2xl font-extrabold tabular-nums ${left < 5000 && room.status === 'live' ? 'animate-pulse border-red-500 text-red-400' : 'border-amber-400 text-amber-400'}`}>{room.status === 'paused' ? '⏸' : secs}</div></div>
+      <div className="mt-3 grid grid-cols-2 gap-2 text-center">
+        <div className="stat-tile !p-2"><div className="text-[10px] font-semibold tracking-widest text-slate-400">CURRENT BID</div><div className="score text-3xl font-extrabold">{room.cur_bidder ? cr(room.cur_bid) : '—'}</div><div className="text-[11px] text-slate-400">{room.cur_bidder ? `Next ${cr(next)}` : `Opens at ${cr(next)}`}</div></div>
+        <div className="stat-tile !p-2" style={{ borderBottom: `4px solid ${hi?.color || 'transparent'}` }}><div className="text-[10px] font-semibold tracking-widest text-slate-400">HIGHEST BIDDER</div><div className="mt-1 flex items-center justify-center gap-1.5">{hi && <Logo team={hi.team} size={26} />}<span className="truncate text-sm font-bold uppercase">{hi ? hi.team : 'No bids yet'}</span></div></div></div>
+      <details className="mt-2"><summary className="cursor-pointer text-xs font-semibold text-amber-300">Player details</summary><div className="arena-scroll mt-2 max-h-52 overflow-y-auto pr-1"><PlayerInfo p={p} rp={cur} room={room} /></div></details>
+    </div> : <div className="card shrink-0 text-center">{room.status === 'review' ? 'First round finished — host can re-auction unsold players.' : room.status === 'done' ? 'Auction complete! See the Final tab.' : 'Waiting…'}</div>}
+    <div className="card shrink-0 !p-2"><div className="flex items-center gap-3 text-xs text-slate-300"><span className="text-green-400"><b>{sold}</b> sold</span><span className="text-red-400"><b>{unsoldN}</b> unsold</span><span><b>{pendingN}</b> to come</span><span className="ml-auto text-slate-400">{done}/{total}</span></div>
+      <div className="mt-1 h-1.5 rounded-full bg-white/10"><div className="h-1.5 rounded-full bg-gradient-to-r from-amber-300 to-amber-500" style={{ width: `${(done / Math.max(total, 1)) * 100}%` }} /></div></div>
+    {isHost && <div className="card shrink-0 !p-2">
+      <div className="flex items-center gap-2"><button onClick={() => setHostOpen(!hostOpen)} className="flex flex-1 items-center gap-2 text-left font-display text-sm font-bold uppercase text-amber-400"><span>{hostOpen ? '▾' : '▸'}</span>Host controls{room.status === 'paused' && <span className="text-xs font-normal normal-case text-slate-300">· paused</span>}</button>
+        {room.status === 'live' && hb('⏸ Pause', 'Pause the auction', () => act('host_pause'))}
+        {room.status === 'paused' && hb('▶ Resume', 'Resume the auction', () => act('host_resume'), 'bg-green-500 text-black')}</div>
+      {hostOpen && <div className="mt-2 flex flex-wrap gap-1">
+        {hb('⏭ Skip', 'Skip to end of queue', () => act('host_skip'))}
+        {hb('Mark UNSOLD', 'Mark this player unsold', () => act('host_unsold'))}
+        {hb('↩ Undo sale', 'Undo the last completed sale', () => confirm('Undo the last completed sale?') && act('host_undo_sale'))}
+        {hb(`🤖 Bots ${room.fill_bots ? 'ON' : 'OFF'}`, 'Toggle bots', () => act('host_bots', { p_on: !room.fill_bots }), room.fill_bots ? 'bg-white/10' : 'bg-red-500/70')}
+        {cur && hb(cur.bots_skip ? '🚫🤖 Sitting out (undo)' : '🚫🤖 Bots sit out', 'Bots sit out this player', () => act('host_bots_skip', { p_rp: cur.id, p_skip: !cur.bots_skip }), cur.bots_skip ? 'bg-red-500/70' : 'bg-white/10')}
+        {room.status === 'review' && hb('Re-auction unsold', 'Re-auction unsold players', () => act('host_reauction'), 'bg-amber-400 text-black')}
+        {hb('End auction', 'End the auction', () => confirm('End the auction?') && act('host_end'), 'bg-red-500/70')}</div>}</div>}
+    <div className="flex shrink-0 gap-1 overflow-x-auto">{RTABS.map(([k, l]) => <button key={k} onClick={() => setRt(k)} className={`btn whitespace-nowrap px-3 py-1 text-sm ${rt === k ? 'bg-amber-400 text-black' : 'bg-white/10'}`}>{l}</button>)}</div>
+      <div className="arena-scroll min-h-[300px] flex-1 space-y-3 overflow-y-auto pr-1 lg:min-h-0">
         {rt === 'xi' && <>
           {mine ? <>{p && <QuickSlot xi={xi} p={p} />}<XiMini xi={xi} setTab={setTab} P={P} /><Needs room={room} mine={mine} rps={rps} P={P} cur={cur} xi={xi} /></> : <div className="card text-sm text-slate-400">Join the auction as a franchise to plan your Playing XI.</div>}
         </>}
@@ -448,9 +534,16 @@ function Live({ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act, autos,
         </>}
         {room.status === 'paused' && <p className="text-center text-amber-300">⏸ Auction paused by host</p>}
       </div>
+  </aside>);
+  return (<div ref={wrapRef} className={fs ? 'fixed inset-0 z-50 overflow-hidden bg-[#050a22] p-2' : 'lg:relative lg:left-1/2 lg:w-[98vw] lg:-translate-x-1/2'}>
+    <style>{ARENA_CSS}</style>
+    <div className={`grid gap-3 ${panelOpen ? 'lg:grid-cols-[minmax(0,1fr)_380px]' : ''}`}>
+      <div className="min-w-0">{stage}</div>
+      {panelOpen && aside}
     </div>
   </div>);
 }
+
 
 function Table({ rps, P, FR, fr, isHost, act, room }) {
   const [q, setQ] = useState(''), [team, setTeam] = useState(''), [role, setRole] = useState(''), [nat, setNat] = useState(''), [st, setSt] = useState(''), [cat, setCat] = useState(''), [sort, setSort] = useState('seq');

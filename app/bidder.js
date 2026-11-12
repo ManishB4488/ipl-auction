@@ -25,7 +25,7 @@ export const armPose = (r, item = 'paddle') => { const a = REST[item]; return { 
 export const gavelAmount = (s) => { if (s < 0 || s >= 0.95) return 0; const ph = (s % 0.475) / 0.475; return ph < 0.55 ? smooth(ph / 0.55) : 1 - smooth((ph - 0.55) / 0.45); };
 // Table positions in the hall (x = left/right, z = towards the stage (-) or the back of the room (+)). Filled in this order, so any
 // number of teams (3-10) gets a mix of left, right, middle and rear tables, never a straight line.
-const SLOTS = [[-5, -2.6], [5, -2.6], [0, 3.2], [-2.3, 0.2], [2.3, 0.2], [-5.8, 2.8], [5.8, 2.8], [-3.1, 5.4], [3.1, 5.4], [0, 7.4]];
+const SLOTS = [[-5.6, -2.9], [5.6, -2.9], [0, 3.6], [-2.8, 0.3], [2.8, 0.3], [-6.7, 3.1], [6.7, 3.1], [-3.6, 6.0], [3.6, 6.0], [0, 8.3]];
 export const slotsFor = (n, k = 1) => SLOTS.slice(0, n).map(([x0, z]) => {   // k < 1 squeezes the room sideways for tall/narrow (phone) screens
   const x = x0 * k;
   const yaw = Math.atan2(-x, AUC.z - (z + 0.2)) * 0.8;   // every rep faces (roughly) the auctioneer
@@ -48,7 +48,7 @@ function useTex(draw, w, h, deps) {
 const Mat = ({ c, r = 0.75, m = 0 }) => <meshStandardMaterial color={c} roughness={r} metalness={m} />;
 
 // ---------- a person (seated owner or standing auctioneer) ----------
-function Person({ pos, yaw, seated, item, skin, hair, suit, tie, index, target, no, short, color, strikeKey, lookAt }) {
+function Person({ pos, yaw, scale = 1, seated, item, skin, hair, suit, tie, index, target, no, short, color, strikeKey, lookAt }) {
   const root = useRef(), body = useRef(), head = useRef(), lidL = useRef(), lidR = useRef(), armR = useRef(), elbR = useRef(), handR = useRef(), held = useRef(), armL = useRef(), elbL = useRef();
   const live = useRef(); live.current = { target, strikeKey, lookAt };
   const st = useRef({ r: 0, seen: undefined, gStart: -100, look: 0, nextBlink: 1.5 + index * 0.8, blinkAt: -1 }).current;
@@ -100,13 +100,15 @@ function Person({ pos, yaw, seated, item, skin, hair, suit, tie, index, target, 
   const { x: sx, y: sy, upper, fore } = SHOULDER;
   const legX = [-0.1, 0.1];
   return (
-    <group position={[pos.x, pos.y || 0, pos.z]} rotation={[0, yaw, 0]}>
+    <group position={[pos.x, pos.y || 0, pos.z]} rotation={[0, yaw, 0]} scale={scale}>
       <group ref={root}>
         {seated ? <>
           {/* chair */}
           <mesh position={[0, 0.4, -0.02]} castShadow receiveShadow><boxGeometry args={[0.56, 0.07, 0.56]} /><Mat c="#15161c" r={0.5} /></mesh>
           <mesh position={[0, 0.78, -0.3]} castShadow><boxGeometry args={[0.52, 0.6, 0.07]} /><Mat c="#15161c" r={0.5} /></mesh>
           <mesh position={[0, 0.78, -0.335]}><boxGeometry args={[0.3, 0.05, 0.02]} /><Mat c={color} r={0.4} /></mesh>
+          {[-0.3, 0.3].map((x) => <mesh key={x} position={[x, 0.62, 0.02]}><boxGeometry args={[0.05, 0.04, 0.34]} /><Mat c="#15161c" r={0.5} /></mesh>)}
+          {[-0.3, 0.3].map((x) => <mesh key={'a' + x} position={[x, 0.52, -0.1]}><boxGeometry args={[0.04, 0.2, 0.04]} /><Mat c="#15161c" r={0.5} /></mesh>)}
           <mesh position={[0, 0.2, -0.02]}><cylinderGeometry args={[0.04, 0.04, 0.4, 8]} /><Mat c="#555" m={0.6} r={0.3} /></mesh>
           <mesh position={[0, 0.02, -0.02]}><cylinderGeometry args={[0.28, 0.28, 0.04, 20]} /><Mat c="#222" /></mesh>
           {legX.map((x) => <group key={x}>
@@ -167,69 +169,176 @@ function Person({ pos, yaw, seated, item, skin, hair, suit, tie, index, target, 
 }
 
 // ---------- the hall ----------
+const IMPACT = 'Impact, "Arial Black", sans-serif';
+const rr = (g, x, y, w, h, r) => { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); };
+const fitFont = (g, txt, size, maxW, min = 26, fam = IMPACT) => { let fs = size; g.font = `bold ${fs}px ${fam}`; while (g.measureText(txt).width > maxW && fs > min) { fs -= 3; g.font = `bold ${fs}px ${fam}`; } return fs; };
+
+// Broadcast-style LED graphic. d = { name, photo, role, country, overseas, capped, base, bid, bidder, bidderColor, stats[], secs, paused, lot }
 function drawLED(g, w, h, d, tall, img) {
-  const gr = g.createLinearGradient(0, 0, w, h); gr.addColorStop(0, '#0d1f66'); gr.addColorStop(1, '#050a22'); g.fillStyle = gr; g.fillRect(0, 0, w, h);
-  g.fillStyle = 'rgba(255,138,31,.95)'; g.fillRect(0, 0, w, 14); g.fillRect(0, h - 14, w, 14);
-  g.textBaseline = 'middle';
+  const gr = g.createLinearGradient(0, 0, w, h); gr.addColorStop(0, '#0b1a5c'); gr.addColorStop(0.6, '#07103a'); gr.addColorStop(1, '#040818'); g.fillStyle = gr; g.fillRect(0, 0, w, h);
+  g.strokeStyle = 'rgba(255,138,31,.07)'; g.lineWidth = 26; for (let x = -h; x < w + h; x += 120) { g.beginPath(); g.moveTo(x, h); g.lineTo(x + h, 0); g.stroke(); }
+  const bar = tall ? 46 : 60;
+  g.fillStyle = '#ff8a1f'; g.fillRect(0, 0, w, bar);
+  g.textBaseline = 'middle'; g.textAlign = 'left'; g.fillStyle = '#071033'; g.font = `bold ${tall ? 28 : 36}px ${IMPACT}`; g.fillText('IPL 2026  ·  MEGA AUCTION', 24, bar / 2 + 2);
+  g.textAlign = 'right'; g.fillText(d && d.lot ? `${d.lot}   ● LIVE` : '● LIVE', w - 24, bar / 2 + 2);
+  g.fillStyle = '#ff8a1f'; g.fillRect(0, h - 10, w, 10);
   if (!d || !d.name) {
-    g.textAlign = 'center'; g.fillStyle = '#ffd36b'; g.font = `bold ${tall ? 120 : 150}px Impact, "Arial Black", sans-serif`; g.fillText('IPL 2026', w / 2, h * 0.38);
-    g.fillStyle = '#fff'; g.font = `bold ${tall ? 66 : 84}px Impact, "Arial Black", sans-serif`; g.fillText('MEGA AUCTION', w / 2, h * 0.64); return;
+    g.textAlign = 'center'; g.fillStyle = '#ffd36b'; g.font = `bold ${tall ? 130 : 190}px ${IMPACT}`; g.fillText('IPL 2026', w / 2, h * 0.42);
+    g.fillStyle = '#fff'; g.font = `bold ${tall ? 70 : 100}px ${IMPACT}`; g.fillText('MEGA AUCTION', w / 2, h * 0.68); return;
   }
-  const fit = (txt, size, maxW) => { let fs = size; g.font = `bold ${fs}px Impact, "Arial Black", sans-serif`; while (g.measureText(txt).width > maxW && fs > 36) { fs -= 4; g.font = `bold ${fs}px Impact, "Arial Black", sans-serif`; } };
-  if (tall) {   // phone layout: everything stacked, nothing at the edges
-    g.textAlign = 'center'; g.fillStyle = '#fff'; fit(d.name.toUpperCase(), 92, w - 80); g.fillText(d.name.toUpperCase(), w / 2, 90);
-    g.fillStyle = '#ffa447'; g.font = 'bold 34px Arial, sans-serif'; g.fillText(`${String(d.role || '').toUpperCase()}  ·  ${d.country || ''}`, w / 2, 160);
-    g.fillStyle = '#fff'; g.font = 'bold 32px Arial, sans-serif'; g.fillText(`BASE  ${cr(d.base)}`, w / 2, 205);
-    g.fillStyle = '#9fb0e6'; g.font = 'bold 26px Arial, sans-serif'; g.fillText('CURRENT BID', w / 2, 270);
-    g.fillStyle = '#ffb347'; g.font = 'bold 130px Impact, "Arial Black", sans-serif'; g.fillText(d.bidder ? cr(d.bid) : '—', w / 2, 355);
-    g.fillStyle = d.bidderColor || '#fff'; fit(d.bidder || 'Awaiting first bid', 44, w - 80); g.fillText(d.bidder || 'Awaiting first bid', w / 2, 440); return;
+  const chip = (txt, x, y, bg, fg, size) => { g.font = `bold ${size}px Arial, sans-serif`; const tw = g.measureText(txt).width + 26; g.fillStyle = bg; rr(g, x, y, tw, size + 16, 8); g.fill(); g.fillStyle = fg; g.textAlign = 'left'; g.fillText(txt, x + 13, y + (size + 16) / 2 + 1); return tw + 10; };
+  const photo = (x, y, pw, ph) => {
+    g.fillStyle = '#16257a'; g.fillRect(x, y, pw, ph);
+    if (img && img.naturalWidth) { const sc = Math.max(pw / img.naturalWidth, ph / img.naturalHeight), sw = pw / sc, sh = ph / sc; g.save(); g.beginPath(); g.rect(x, y, pw, ph); g.clip(); g.drawImage(img, (img.naturalWidth - sw) / 2, 0, sw, sh, x, y, pw, ph); g.restore(); }
+    else { g.textAlign = 'center'; g.fillStyle = '#ffd36b'; g.font = `bold ${Math.round(pw * 0.42)}px ${IMPACT}`; g.fillText(d.name.split(' ').map((q) => q[0]).slice(0, 2).join('').toUpperCase(), x + pw / 2, y + ph / 2); }
+    g.lineWidth = 6; g.strokeStyle = '#ff8a1f'; g.strokeRect(x, y, pw, ph);
+  };
+  const ring = (cx, cy, rad) => {
+    if (d.secs == null && !d.paused) return;
+    g.lineWidth = 10; g.strokeStyle = d.paused ? '#9fb0e6' : d.secs <= 5 ? '#ef4444' : '#ffb347'; g.beginPath(); g.arc(cx, cy, rad, 0, Math.PI * 2); g.stroke();
+    g.textAlign = 'center'; g.fillStyle = '#fff'; g.font = `bold ${Math.round(rad * 1.05)}px ${IMPACT}`; g.fillText(d.paused ? 'II' : String(d.secs), cx, cy + 3);
+  };
+  const tag = d.overseas ? ['#38bdf8', `✈ ${d.country || 'OVERSEAS'}`] : ['#22c55e', 'INDIAN'];
+  if (tall) {   // phone layout 800 x 640
+    photo(28, 70, 190, 240);
+    g.textAlign = 'left'; g.fillStyle = '#fff'; fitFont(g, d.name.toUpperCase(), 78, w - 260); g.fillText(d.name.toUpperCase(), 244, 110);
+    let x = 244; x += chip(String(d.role || '').toUpperCase(), x, 150, '#fbbf24', '#111', 24); chip(tag[1].toUpperCase(), x, 150, tag[0], '#111', 24);
+    g.fillStyle = '#cfd8f6'; g.font = '26px Arial, sans-serif'; g.textAlign = 'left'; g.fillText((d.stats || []).slice(0, 2).join('  •  '), 244, 235);
+    g.fillStyle = '#fff'; g.font = 'bold 30px Arial, sans-serif'; g.fillText(`BASE  ${cr(d.base)}`, 244, 285);
+    g.fillStyle = '#9fb0e6'; g.font = 'bold 24px Arial, sans-serif'; g.textAlign = 'center'; g.fillText('CURRENT BID', w / 2, 352);
+    g.fillStyle = '#ffb347'; g.font = `bold 140px ${IMPACT}`; g.fillText(d.bidder ? cr(d.bid) : '—', w / 2, 440);
+    g.fillStyle = d.bidderColor || '#fff'; fitFont(g, d.bidder || 'Awaiting first bid', 50, w - 200); g.fillText(d.bidder || 'Awaiting first bid', w / 2 - 40, 530);
+    ring(w - 90, 520, 44); return;
   }
-  const PX = 40, PY = 44, PW = 230, PH = h - 88, TX = 300;   // photo frame on the left, text column on the right
-  g.fillStyle = '#1a2a6e'; g.fillRect(PX, PY, PW, PH);
-  if (img && img.naturalWidth) {
-    const sc = Math.max(PW / img.naturalWidth, PH / img.naturalHeight), sw = PW / sc, sh = PH / sc;
-    g.save(); g.beginPath(); g.rect(PX, PY, PW, PH); g.clip();
-    g.drawImage(img, (img.naturalWidth - sw) / 2, 0, sw, sh, PX, PY, PW, PH); g.restore();
-  } else {
-    g.textAlign = 'center'; g.fillStyle = '#ffd36b'; g.font = 'bold 110px Impact, "Arial Black", sans-serif';
-    g.fillText(d.name.split(' ').map((x) => x[0]).slice(0, 2).join('').toUpperCase(), PX + PW / 2, PY + PH / 2);
-  }
-  g.lineWidth = 6; g.strokeStyle = 'rgba(255,138,31,.95)'; g.strokeRect(PX, PY, PW, PH);
-  g.textAlign = 'left'; g.fillStyle = '#fff'; fit(d.name.toUpperCase(), 92, w - TX - 40); g.fillText(d.name.toUpperCase(), TX, 100);
-  g.fillStyle = '#ffa447'; g.font = 'bold 38px Arial, sans-serif'; g.fillText(String(d.role || '').toUpperCase(), TX, 170);
-  g.fillStyle = '#cfd8f6'; g.font = '32px Arial, sans-serif'; g.fillText(d.country || '', TX, 214);
-  g.fillStyle = '#fff'; g.font = 'bold 34px Arial, sans-serif'; g.fillText(`BASE  ${cr(d.base)}`, TX, 258);
-  g.fillStyle = '#9fb0e6'; g.font = 'bold 28px Arial, sans-serif'; g.fillText('CURRENT BID', TX, 318);
-  g.fillStyle = '#ffb347'; g.font = 'bold 120px Impact, "Arial Black", sans-serif'; g.fillText(d.bidder ? cr(d.bid) : '—', TX, 392);
-  g.fillStyle = d.bidderColor || '#fff'; fit(d.bidder || 'Awaiting first bid', 44, w - TX - 40); g.fillText(d.bidder || 'Awaiting first bid', TX, 462);
+  photo(48, 96, 330, h - 96 - 40);   // landscape 1280 x 640
+  const TX = 420;
+  g.textAlign = 'left'; g.fillStyle = '#fff'; fitFont(g, d.name.toUpperCase(), 108, w - TX - 48); g.fillText(d.name.toUpperCase(), TX, 170);
+  let x = TX; x += chip(String(d.role || '').toUpperCase(), x, 226, '#fbbf24', '#111', 30); x += chip(tag[1].toUpperCase(), x, 226, tag[0], '#111', 30);
+  x += chip(d.capped === 'Capped' ? 'CAPPED' : 'UNCAPPED', x, 226, d.capped === 'Capped' ? '#a855f7' : '#64748b', '#fff', 30);
+  g.fillStyle = '#cfd8f6'; fitFont(g, (d.stats || []).join('   •   '), 32, w - TX - 48 - 110, 20, 'Arial, sans-serif'); g.font = g.font.replace('bold ', ''); g.fillText((d.stats || []).join('   •   '), TX, 318);
+  g.fillStyle = '#9fb0e6'; g.font = 'bold 26px Arial, sans-serif'; g.fillText('BASE PRICE', TX, 372); g.fillStyle = '#fff'; g.font = `bold 44px ${IMPACT}`; g.fillText(cr(d.base), TX + 170, 370);
+  g.fillStyle = 'rgba(2,6,24,.78)'; rr(g, TX, 410, w - TX - 48, 190, 14); g.fill();
+  g.fillStyle = d.bidderColor || '#ff8a1f'; g.fillRect(TX, 410, 12, 190);
+  g.fillStyle = '#9fb0e6'; g.font = 'bold 26px Arial, sans-serif'; g.fillText('CURRENT BID', TX + 40, 446);
+  g.fillStyle = '#ffb347'; fitFont(g, d.bidder ? cr(d.bid) : '—', 124, 400); g.fillText(d.bidder ? cr(d.bid) : '—', TX + 40, 535);
+  g.fillStyle = '#9fb0e6'; g.font = 'bold 26px Arial, sans-serif'; g.fillText('HIGHEST BIDDER', 890, 446);
+  g.fillStyle = d.bidderColor || '#fff'; fitFont(g, d.bidder || 'Awaiting first bid', 46, 320); g.fillText(d.bidder || 'Awaiting first bid', 890, 500);
+  ring(w - 48 - 40, 366, 36);
 }
 
-function Audience() {   // two tiered stands on the sides; instanced meshes keep it cheap
-  const seats = useMemo(() => {
+function drawResult(g, w, h, r) {
+  const sold = r.status === 'sold', col = sold ? '#22c55e' : '#ef4444';
+  g.fillStyle = 'rgba(3,7,24,.96)'; g.fillRect(0, 0, w, h);
+  g.fillStyle = r.color || col; g.fillRect(0, 0, w, 20); g.fillRect(0, h - 20, w, 20);
+  g.lineWidth = 10; g.strokeStyle = col; g.strokeRect(5, 5, w - 10, h - 10);
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillStyle = col; g.font = `bold ${sold ? 190 : 150}px ${IMPACT}`; g.fillText(sold ? 'SOLD!' : 'UNSOLD', w / 2, 140);
+  g.fillStyle = '#fff'; fitFont(g, String(r.player || '').toUpperCase(), 66, w - 120); g.fillText(String(r.player || '').toUpperCase(), w / 2, 260);
+  if (sold) {
+    g.fillStyle = r.color || '#fff'; fitFont(g, String(r.team || ''), 56, w - 120); g.fillText(String(r.team || ''), w / 2, 340);
+    g.fillStyle = '#ffb347'; g.font = `bold 120px ${IMPACT}`; g.fillText(cr(r.price), w / 2, 435);
+  } else { g.fillStyle = '#cfd8f6'; g.font = 'bold 54px Arial, sans-serif'; g.fillText('NO TEAM BOUGHT THIS PLAYER', w / 2, 370); }
+}
+
+// pop-in SOLD / UNSOLD card on the giant LED screen. Only mounted for a few seconds after the SERVER confirmed the result.
+function ResultCard({ r, LW }) {
+  const tex = useTex((g, w, h) => drawResult(g, w, h, r), 1024, 512, [r.key]);
+  const m = useRef(), mat = useRef(), t0 = useRef(performance.now());
+  useFrame(() => {
+    const a = (performance.now() - t0.current) / 1000, s = a < 0.5 ? 0.55 + 0.45 * (1 + 2.2 * Math.pow(a / 0.5 - 1, 3) + 1.2 * Math.pow(a / 0.5 - 1, 2)) : 1;
+    const op = a < 0.2 ? a / 0.2 : a > 3.9 ? Math.max(0, 1 - (a - 3.9) / 0.6) : 1;
+    if (m.current) m.current.scale.set(s, s, 1); if (mat.current) mat.current.opacity = op;
+  });
+  return <mesh ref={m} position={[0, 3.95, AUC.z - 2.4]} renderOrder={5}><planeGeometry args={[LW * 0.78, LW * 0.39]} /><meshBasicMaterial ref={mat} map={tex} transparent toneMapped={false} depthWrite={false} /></mesh>;
+}
+
+// orange swipe across the screen whenever a new player comes on the block
+function Wipe({ k, LW, LH }) {
+  const m = useRef(), t0 = useRef(-10), seen = useRef(k);
+  useFrame(() => {
+    if (seen.current !== k) { seen.current = k; t0.current = performance.now(); }
+    const a = (performance.now() - t0.current) / 1000;
+    if (!m.current) return;
+    if (a > 0.75) { m.current.visible = false; return; }
+    m.current.visible = true; const p = a / 0.75; m.current.position.x = lerp(-LW * 0.9, LW * 0.9, smooth(p));
+  });
+  return <mesh ref={m} position={[0, 3.95, AUC.z - 2.42]} visible={false} renderOrder={4}><planeGeometry args={[LW * 0.45, LH]} /><meshBasicMaterial color="#ff8a1f" transparent opacity={0.9} toneMapped={false} depthWrite={false} /></mesh>;
+}
+
+function TVCam({ x, z, focus }) {
+  const head = useRef(), tally = useRef();
+  useFrame((_, dt) => {
+    const f = focus.current, want = Math.atan2(f.x - x, f.z - z);
+    head.current.rotation.y = head.current.rotation.y + wrap(want - head.current.rotation.y) * (1 - Math.exp(-2.5 * Math.min(dt, 0.05)));
+    tally.current.visible = Math.floor(performance.now() / 700) % 2 === 0;
+  });
+  return (<group position={[x, 0, z]}>
+    {[0, 2.1, 4.2].map((a) => <mesh key={a} position={[Math.sin(a) * 0.28, 0.65, Math.cos(a) * 0.28]} rotation={[Math.cos(a) * 0.22, 0, -Math.sin(a) * 0.22]}><cylinderGeometry args={[0.025, 0.02, 1.35, 6]} /><Mat c="#14151a" /></mesh>)}
+    <group ref={head} position={[0, 1.45, 0]}>
+      <mesh castShadow><boxGeometry args={[0.42, 0.34, 0.8]} /><Mat c="#1b1d26" m={0.3} r={0.5} /></mesh>
+      <mesh position={[0, 0, 0.55]} rotation={[Math.PI / 2, 0, 0]}><cylinderGeometry args={[0.13, 0.17, 0.4, 16]} /><Mat c="#07080c" m={0.4} r={0.3} /></mesh>
+      <mesh position={[0, 0.22, -0.12]}><boxGeometry args={[0.3, 0.1, 0.4]} /><Mat c="#2a2d3a" /></mesh>
+      <mesh ref={tally} position={[0.1, 0.19, 0.3]}><sphereGeometry args={[0.035, 8, 8]} /><meshBasicMaterial color="#ff2d2d" /></mesh>
+    </group></group>);
+}
+
+function Audience({ cheer, compact }) {
+  const rows = compact ? 3 : 5, PER = 14;
+  const people = useMemo(() => {
     const out = []; let k = 11; const rnd = () => { k = (k * 16807) % 2147483647; return k / 2147483647; };
-    for (const side of [-1, 1]) for (let row = 0; row < 4; row++) for (let i = 0; i < 14; i++) out.push({ x: side * (9.4 + row * 1.1), y: 0.3 + row * 0.5, z: -7 + i * 1.2, occ: rnd() > 0.25, tone: 0.25 + rnd() * 0.5, side });
+    for (const side of [-1, 1]) for (let row = 0; row < rows; row++) for (let i = 0; i < PER; i++) {
+      const x = side * (9.7 + row * 1.2), z = -6.5 + i * 1.2, top = row * 0.55 + 0.05;
+      out.push({ x, y: top + 0.25, z, side, occ: rnd() > 0.16, sc: 0.92 + rnd() * 0.16, ph: rnd() * 6.28, sp: 1.1 + rnd() * 1.6, shirt: rnd(), skin: Math.floor(rnd() * 5), hair: Math.floor(rnd() * 5), yaw: Math.atan2(-x, -2 - z) });
+    }
     return out;
-  }, []);
-  const occ = useMemo(() => seats.filter((x) => x.occ), [seats]);
-  const a = useRef(), b = useRef(), h = useRef();
-  useEffect(() => {
-    const m = new THREE.Matrix4(), c = new THREE.Color();
-    seats.forEach((s, i) => { m.makeTranslation(s.x, s.y, s.z); a.current.setMatrixAt(i, m); });
-    occ.forEach((s, i) => {
-      m.makeTranslation(s.x, s.y + 0.42, s.z); b.current.setMatrixAt(i, m); c.setHSL(0.6 + s.tone * 0.1, 0.25, 0.12 + s.tone * 0.18); b.current.setColorAt(i, c);
-      m.makeTranslation(s.x, s.y + 0.82, s.z); h.current.setMatrixAt(i, m); c.setHSL(0.07, 0.35, 0.25 + s.tone * 0.2); h.current.setColorAt(i, c);
+  }, [rows]);
+  const occ = useMemo(() => people.filter((p) => p.occ), [people]);
+  const refs = { seat: useRef(), back: useRef(), torso: useRef(), head: useRef(), hair: useRef(), armL: useRef(), armR: useRef() };
+  const T = useMemo(() => ({ g: new THREE.Matrix4(), l: new THREE.Matrix4(), q: new THREE.Quaternion(), q2: new THREE.Quaternion(), p: new THREE.Vector3(), s: new THREE.Vector3(), up: new THREE.Vector3(0, 1, 0), fw: new THREE.Vector3(0, 0, 1), col: new THREE.Color() }), []);
+  const frame = useRef(0);
+  const place = (mesh, i, base, yaw, sc, lx, ly, lz, rz) => {
+    T.q.setFromAxisAngle(T.up, yaw); T.p.set(base.x, base.y, base.z); T.s.set(sc, sc, sc); T.g.compose(T.p, T.q, T.s);
+    T.q2.setFromAxisAngle(T.fw, rz); T.p.set(lx, ly, lz); T.s.set(1, 1, 1); T.l.compose(T.p, T.q2, T.s); T.g.multiply(T.l); mesh.setMatrixAt(i, T.g);
+  };
+  useEffect(() => {   // static parts + colours (once)
+    people.forEach((p, i) => { place(refs.seat.current, i, p, p.yaw, 1, 0, 0, 0, 0); place(refs.back.current, i, p, p.yaw, 1, 0, 0.42, -0.3, 0); });
+    const SHIRTS = ['#1e3a8a', '#7f1d1d', '#facc15', '#0e7490', '#4338ca', '#be123c', '#ea580c', '#15803d', '#e5e7eb', '#6d28d9'], SKINS_A = ['#e8b895', '#d6a07a', '#b9825c', '#8d5a3b', '#a06b47'], HAIRS_A = ['#111', '#1a1412', '#2b1d14', '#3a2a1c', '#6b6b6b'];
+    occ.forEach((p, i) => {
+      T.col.set(SHIRTS[Math.floor(p.shirt * SHIRTS.length)]); refs.torso.current.setColorAt(i, T.col); T.col.set(SKINS_A[p.skin]); refs.head.current.setColorAt(i, T.col); refs.armL.current.setColorAt(i, T.col); refs.armR.current.setColorAt(i, T.col);
+      T.col.set(HAIRS_A[p.hair]); refs.hair.current.setColorAt(i, T.col);
     });
-    [a, b, h].forEach((r) => { r.current.instanceMatrix.needsUpdate = true; if (r.current.instanceColor) r.current.instanceColor.needsUpdate = true; });
-  }, [seats, occ]);
+    ['seat', 'back'].forEach((k) => { refs[k].current.instanceMatrix.needsUpdate = true; });
+    ['torso', 'head', 'hair', 'armL', 'armR'].forEach((k) => { refs[k].current.instanceColor.needsUpdate = true; });
+  }, [people, occ]); // eslint-disable-line react-hooks/exhaustive-deps
+  useFrame((st, dt) => {
+    cheer.current = Math.max(0, cheer.current - Math.min(dt, 0.05) * 0.3);
+    frame.current++; const c = cheer.current; if (c < 0.01 && frame.current % 3) return;
+    const t = st.clock.elapsedTime;
+    occ.forEach((p, i) => {
+      const bob = Math.sin(t * p.sp + p.ph) * 0.012 + c * Math.abs(Math.sin(t * 5.5 + p.ph)) * 0.12, lift = c * Math.abs(Math.sin(t * 5.5 + p.ph)) * 0.12;
+      place(refs.torso.current, i, p, p.yaw, p.sc, 0, 0.62 + bob, 0, 0);
+      place(refs.head.current, i, p, p.yaw, p.sc, 0, 1.12 + bob, 0, 0);
+      place(refs.hair.current, i, p, p.yaw, p.sc, 0, 1.17 + bob, -0.01, 0);
+      const th = 0.14 + c * (2.5 + Math.sin(t * 8 + p.ph) * 0.3) + Math.sin(t * p.sp + p.ph) * 0.03;
+      place(refs.armR.current, i, p, p.yaw, p.sc, 0.2 + Math.sin(th) * 0.19, 0.84 + bob - Math.cos(th) * 0.19, 0.02, th);
+      place(refs.armL.current, i, p, p.yaw, p.sc, -0.2 - Math.sin(th) * 0.19, 0.84 + bob - Math.cos(th) * 0.19, 0.02, -th);
+    });
+    ['torso', 'head', 'hair', 'armL', 'armR'].forEach((k) => { refs[k].current.instanceMatrix.needsUpdate = true; });
+  });
+  const inst = (key, n, geo, mat) => <instancedMesh key={key} ref={refs[key]} args={[null, null, n]} frustumCulled={false} castShadow={key === 'torso'}>{geo}{mat}</instancedMesh>;
   return (<>
-    <instancedMesh ref={a} args={[null, null, seats.length]}><boxGeometry args={[0.6, 0.5, 0.7]} /><meshStandardMaterial color="#1a1d33" roughness={0.8} /></instancedMesh>
-    <instancedMesh ref={b} args={[null, null, occ.length]}><boxGeometry args={[0.4, 0.5, 0.4]} /><meshStandardMaterial roughness={0.9} /></instancedMesh>
-    <instancedMesh ref={h} args={[null, null, occ.length]}><sphereGeometry args={[0.13, 12, 10]} /><meshStandardMaterial roughness={0.7} /></instancedMesh>
-    {[-1, 1].map((sd) => [0, 1, 2, 3].map((row) => <mesh key={sd + '-' + row} position={[sd * (9.4 + row * 1.1), 0.05 + row * 0.25, 1.6]} receiveShadow><boxGeometry args={[1.1, 0.1 + row * 0.5, 17]} /><meshStandardMaterial color="#10142c" roughness={0.9} /></mesh>))}
+    {inst('seat', people.length, <boxGeometry args={[0.6, 0.5, 0.62]} />, <meshStandardMaterial color="#1a1d33" roughness={0.7} />)}
+    {inst('back', people.length, <boxGeometry args={[0.58, 0.62, 0.08]} />, <meshStandardMaterial color="#232744" roughness={0.7} />)}
+    {inst('torso', occ.length, <capsuleGeometry args={[0.17, 0.3, 6, 12]} />, <meshStandardMaterial roughness={0.85} />)}
+    {inst('head', occ.length, <sphereGeometry args={[0.115, 14, 12]} />, <meshStandardMaterial roughness={0.6} />)}
+    {inst('hair', occ.length, <sphereGeometry args={[0.122, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.5]} />, <meshStandardMaterial roughness={0.9} />)}
+    {inst('armL', occ.length, <capsuleGeometry args={[0.04, 0.26, 4, 8]} />, <meshStandardMaterial roughness={0.7} />)}
+    {inst('armR', occ.length, <capsuleGeometry args={[0.04, 0.26, 4, 8]} />, <meshStandardMaterial roughness={0.7} />)}
+    {[-1, 1].map((sd) => Array.from({ length: rows }, (_, row) => { const top = row * 0.55 + 0.05; return <mesh key={sd + '-' + row} position={[sd * (9.7 + row * 1.2), top / 2, 1.9]} receiveShadow><boxGeometry args={[1.2, top, 18]} /><meshStandardMaterial color={row % 2 ? '#0f1330' : '#12173a'} roughness={0.9} /></mesh>; }))}
   </>);
 }
 
-function Hall({ screen, compact }) {
+function Hall({ screen, compact, fresh }) {
   const [img, setImg] = useState(null);   // player photo for the LED screen (loaded with CORS so it can be drawn into the texture)
   const photo = screen && screen.photo;
   useEffect(() => {
@@ -239,131 +348,201 @@ function Hall({ screen, compact }) {
     im.onload = () => { if (!dead) setImg(im); }; im.src = photo;
     return () => { dead = true; };
   }, [photo]);
-  const led = useTex((g, w, h) => drawLED(g, w, h, screen, compact, img), compact ? 640 : 1024, 512, [JSON.stringify(screen || null), compact, img]);
-  const LW = compact ? 5.6 : 9;
-  const deskTex = useTex((g, w, h) => { g.fillStyle = '#3a210f'; g.fillRect(0, 0, w, h); g.fillStyle = '#ffd36b'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = 'bold 64px Impact, sans-serif'; g.fillText('IPL AUCTION', w / 2, h / 2); }, 512, 128, []);
-  const AY = STAGE_Y;
+  const LW = compact ? 6.4 : 11, LH = compact ? 5.12 : 5.5, LY = compact ? 3.7 : 3.95;
+  const led = useTex((g, w, h) => drawLED(g, w, h, screen, compact, img), compact ? 800 : 1280, compact ? 640 : 640, [JSON.stringify(screen || null), compact, img]);
+  const deskTex = useTex((g, w, h) => { g.fillStyle = '#2a1a0c'; g.fillRect(0, 0, w, h); g.fillStyle = '#ff8a1f'; g.fillRect(0, 0, w, 12); g.fillStyle = '#ffd36b'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = `bold 78px ${IMPACT}`; g.fillText('IPL 2026', w / 2, h * 0.42); g.fillStyle = '#fff'; g.font = `bold 40px ${IMPACT}`; g.fillText('MEGA AUCTION', w / 2, h * 0.76); }, 512, 256, []);
+  const floorTex = useTex((g, w, h) => { g.fillStyle = '#0a1030'; g.fillRect(0, 0, w, h); g.strokeStyle = 'rgba(122,162,255,.10)'; g.lineWidth = 2; for (let i = 0; i <= w; i += 64) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i, h); g.stroke(); g.beginPath(); g.moveTo(0, i); g.lineTo(w, i); g.stroke(); } }, 512, 512, []);
+  useEffect(() => { floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping; floorTex.repeat.set(14, 14); floorTex.needsUpdate = true; }, [floorTex]);
+  const wallTex = useTex((g, w, h) => { const gr = g.createLinearGradient(0, 0, 0, h); gr.addColorStop(0, '#0b1240'); gr.addColorStop(1, '#050a24'); g.fillStyle = gr; g.fillRect(0, 0, w, h); g.fillStyle = 'rgba(255,138,31,.10)'; for (let x = -h; x < w; x += 140) { g.beginPath(); g.moveTo(x, h); g.lineTo(x + 70, h); g.lineTo(x + 70 + h, 0); g.lineTo(x + h, 0); g.closePath(); g.fill(); } g.fillStyle = 'rgba(110,150,255,.12)'; for (let x = 40; x < w; x += 140) g.fillRect(x, 0, 6, h); }, 1024, 512, []);
+  const bannerTex = useTex((g, w, h) => { g.fillStyle = '#070d33'; g.fillRect(0, 0, w, h); g.fillStyle = '#ff8a1f'; g.fillRect(0, 0, w, 14); g.fillRect(0, h - 14, w, 14); g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = '#ffd36b'; g.font = `bold 120px ${IMPACT}`; g.fillText('IPL 2026', w / 2, h * 0.42); g.fillStyle = '#fff'; g.font = `bold 64px ${IMPACT}`; g.fillText('MEGA AUCTION  ·  FRIENDS EDITION', w / 2, h * 0.76); }, 1024, 256, []);
+  const ceilTex = useTex((g, w, h) => { g.fillStyle = '#04071c'; g.fillRect(0, 0, w, h); g.fillStyle = '#cfe0ff'; for (let x = 32; x < w; x += 128) for (let y = 32; y < h; y += 128) g.fillRect(x, y, 64, 64); }, 512, 512, []);
+  useEffect(() => { ceilTex.wrapS = ceilTex.wrapT = THREE.RepeatWrapping; ceilTex.repeat.set(5, 5); ceilTex.needsUpdate = true; }, [ceilTex]);
+  const AY = STAGE_Y, SK = 1.25;   // auctioneer + podium are drawn 25% larger so the stage reads from the wide shot
   return (<>
     <color attach="background" args={['#050a22']} />
+    <fog attach="fog" args={['#050a22', 34, 80]} />
     {/* floor + carpet */}
-    <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow><planeGeometry args={[60, 60]} /><meshStandardMaterial color="#0a0f28" roughness={0.4} metalness={0.35} /></mesh>
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.004, 0.5]} receiveShadow><planeGeometry args={[16.4, 22]} /><meshStandardMaterial color="#c9a24a" roughness={0.6} /></mesh>
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.008, 0.5]} receiveShadow><planeGeometry args={[16, 21.6]} /><meshStandardMaterial color="#0f1a40" roughness={0.95} /></mesh>
-    {/* walls */}
-    <mesh position={[0, 5, -12]}><planeGeometry args={[40, 14]} /><meshStandardMaterial color="#070b22" roughness={1} /></mesh>
-    {[-1, 1].map((sd) => <mesh key={sd} position={[sd * 16, 5, 0]} rotation={[0, -sd * Math.PI / 2, 0]}><planeGeometry args={[30, 14]} /><meshStandardMaterial color="#080c24" roughness={1} /></mesh>)}
-    {/* stage */}
-    <mesh position={[0, AY / 2, AUC.z - 0.6]} castShadow receiveShadow><boxGeometry args={[11, AY, 4.2]} /><meshStandardMaterial color="#141a3d" roughness={0.45} metalness={0.2} /></mesh>
-    <mesh position={[0, AY + 0.003, AUC.z + 1.5]}><boxGeometry args={[11, 0.05, 0.06]} /><meshBasicMaterial color="#ffb347" /></mesh>
-    {/* giant LED screen behind the auctioneer */}
-    <mesh position={[0, 3.6, AUC.z - 2.55]}><boxGeometry args={[LW + 0.4, 4.7, 0.2]} /><meshStandardMaterial color="#05060d" roughness={0.5} /></mesh>
-    <mesh position={[0, 3.6, AUC.z - 2.44]}><planeGeometry args={[LW, 4.3]} /><meshBasicMaterial map={led} toneMapped={false} /></mesh>
-    {[-1, 1].map((sd) => sd * (LW / 2 + 0.7)).map((x) => <mesh key={x} position={[x, 2.6, AUC.z - 2.4]}><boxGeometry args={[0.5, 5.2, 0.4]} /><meshStandardMaterial color="#10142c" roughness={0.6} /></mesh>)}
-    {/* podium, mic and gavel block */}
-    <mesh position={[AUC.x, AY + 0.45, AUC.z + 0.75]} castShadow><boxGeometry args={[1.9, 0.9, 0.6]} /><meshStandardMaterial color="#3a210f" roughness={0.4} /></mesh>
-    <mesh position={[AUC.x, AY + 0.45, AUC.z + 1.056]}><planeGeometry args={[1.7, 0.5]} /><meshBasicMaterial map={deskTex} toneMapped={false} /></mesh>
-    <mesh position={[AUC.x + 0.3, AY + 0.93, AUC.z + 0.5]}><cylinderGeometry args={[0.13, 0.15, 0.05, 20]} /><meshStandardMaterial color="#5a3a1e" roughness={0.4} /></mesh>
-    <group position={[AUC.x - 0.35, AY + 0.9, AUC.z + 0.85]}>
-      <mesh position={[0, 0.15, 0]}><cylinderGeometry args={[0.012, 0.012, 0.3, 8]} /><meshStandardMaterial color="#aaa" metalness={0.8} roughness={0.3} /></mesh>
-      <mesh position={[0, 0.34, 0]}><sphereGeometry args={[0.045, 12, 10]} /><meshStandardMaterial color="#222" roughness={0.5} /></mesh></group>
+    <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow><planeGeometry args={[80, 80]} /><meshStandardMaterial map={floorTex} roughness={0.28} metalness={0.45} /></mesh>
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.004, 0.8]} receiveShadow><planeGeometry args={[18.6, 24]} /><meshStandardMaterial color="#c9a24a" roughness={0.6} /></mesh>
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.008, 0.8]} receiveShadow><planeGeometry args={[18.2, 23.6]} /><meshStandardMaterial color="#0e1a44" roughness={0.95} /></mesh>
+    {[-1, 1].map((sd) => <mesh key={sd} rotation={[-Math.PI / 2, 0, 0]} position={[sd * 0.9, 0.011, 2]}><planeGeometry args={[0.06, 20]} /><meshBasicMaterial color="#ff8a1f" /></mesh>)}
+    {/* walls with branding */}
+    <mesh position={[0, 6, -12.2]}><planeGeometry args={[46, 16]} /><meshBasicMaterial map={wallTex} toneMapped={false} /></mesh>
+    {[-1, 1].map((sd) => <group key={sd}>
+      <mesh position={[sd * 17, 6, 0]} rotation={[0, -sd * Math.PI / 2, 0]}><planeGeometry args={[34, 16]} /><meshBasicMaterial map={wallTex} toneMapped={false} /></mesh>
+      <mesh position={[sd * 16.9, 5.4, 1]} rotation={[0, -sd * Math.PI / 2, 0]}><planeGeometry args={[12, 3]} /><meshBasicMaterial map={bannerTex} toneMapped={false} /></mesh>
+      {[-8, -3, 2, 7].map((z) => <mesh key={z} position={[sd * 16.85, 2.6, z]}><boxGeometry args={[0.1, 5, 0.18]} /><meshBasicMaterial color="#ff8a1f" /></mesh>)}</group>)}
+    {!compact && <mesh position={[0, 11.2, -1]} rotation={[Math.PI / 2, 0, 0]}><planeGeometry args={[46, 40]} /><meshBasicMaterial map={ceilTex} toneMapped={false} /></mesh>}
+    {/* stage: wide platform with steps and a glowing edge */}
+    <mesh position={[0, AY / 2, AUC.z - 0.7]} castShadow receiveShadow><boxGeometry args={[14, AY, 5.4]} /><meshStandardMaterial color="#141a3d" roughness={0.35} metalness={0.3} /></mesh>
+    <mesh position={[0, AY / 2 - 0.1, AUC.z + 2.35]} receiveShadow><boxGeometry args={[7, AY - 0.2, 0.7]} /><meshStandardMaterial color="#10163a" roughness={0.5} /></mesh>
+    <mesh position={[0, AY + 0.004, AUC.z + 2.02]}><boxGeometry args={[14, 0.04, 0.07]} /><meshBasicMaterial color="#ffb347" /></mesh>
+    <mesh position={[0, 0.02, AUC.z + 2.03]}><boxGeometry args={[14, 0.04, 0.05]} /><meshBasicMaterial color="#ff8a1f" /></mesh>
+    {/* giant LED screen behind the auctioneer (nothing hangs in front of it) */}
+    <mesh position={[0, LY, AUC.z - 2.55]}><boxGeometry args={[LW + 0.5, LH + 0.4, 0.2]} /><meshStandardMaterial color="#05060d" roughness={0.5} /></mesh>
+    <mesh position={[0, LY, AUC.z - 2.44]}><planeGeometry args={[LW, LH]} /><meshBasicMaterial map={led} toneMapped={false} /></mesh>
+    <mesh position={[0, LY + LH / 2 + 0.28, AUC.z - 2.4]}><boxGeometry args={[LW + 0.5, 0.06, 0.06]} /><meshBasicMaterial color="#ff8a1f" /></mesh>
+    <Wipe k={screen && screen.name} LW={LW} LH={LH} />
+    {fresh && <ResultCard key={fresh.key} r={fresh} LW={LW} />}
+    {[-1, 1].map((sd) => sd * (LW / 2 + 1.1)).map((x) => <mesh key={x} position={[x, 3, AUC.z - 2.35]}><boxGeometry args={[0.7, 6, 0.5]} /><meshStandardMaterial color="#0e1230" roughness={0.6} /></mesh>)}
+    {[-1, 1].map((sd) => sd * (LW / 2 + 1.1)).map((x) => <mesh key={'g' + x} position={[x, 3, AUC.z - 2.08]}><boxGeometry args={[0.1, 5.6, 0.04]} /><meshBasicMaterial color="#ff8a1f" /></mesh>)}
+    {/* podium, microphone, gavel block */}
+    <mesh position={[AUC.x, AY + 0.55, AUC.z + 0.94]} castShadow><boxGeometry args={[2.4, 1.1, 0.78]} /><meshStandardMaterial color="#2a1a0c" roughness={0.35} /></mesh>
+    <mesh position={[AUC.x, AY + 1.12, AUC.z + 0.94]}><boxGeometry args={[2.5, 0.06, 0.86]} /><meshStandardMaterial color="#ffb347" roughness={0.3} metalness={0.4} /></mesh>
+    <mesh position={[AUC.x, AY + 0.55, AUC.z + 1.335]}><planeGeometry args={[2.2, 0.9]} /><meshBasicMaterial map={deskTex} toneMapped={false} /></mesh>
+    <mesh position={[AUC.x + 0.38, AY + 1.17, AUC.z + 0.62]}><cylinderGeometry args={[0.16, 0.19, 0.06, 20]} /><meshStandardMaterial color="#5a3a1e" roughness={0.4} /></mesh>
+    <group position={[AUC.x - 0.45, AY + 1.15, AUC.z + 1.05]}>
+      <mesh position={[0, 0.2, 0]}><cylinderGeometry args={[0.014, 0.014, 0.4, 8]} /><meshStandardMaterial color="#aaa" metalness={0.8} roughness={0.3} /></mesh>
+      <mesh position={[0, 0.42, -0.06]} rotation={[0.9, 0, 0]}><cylinderGeometry args={[0.012, 0.012, 0.2, 8]} /><meshStandardMaterial color="#aaa" metalness={0.8} roughness={0.3} /></mesh>
+      <mesh position={[0, 0.5, -0.14]}><sphereGeometry args={[0.05, 12, 10]} /><meshStandardMaterial color="#111" roughness={0.5} /></mesh></group>
   </>);
 }
 
 function Table({ team, leading }) {
-  const front = useTex((g, w, h) => { g.fillStyle = team.color; g.fillRect(0, 0, w, h); g.fillStyle = 'rgba(0,0,0,.28)'; g.fillRect(0, h * 0.62, w, h * 0.38); g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle'; let fs = 70; g.font = `bold ${fs}px Impact, "Arial Black", sans-serif`; const t = team.name.toUpperCase(); while (g.measureText(t).width > w - 40 && fs > 26) { fs -= 4; g.font = `bold ${fs}px Impact, "Arial Black", sans-serif`; } g.fillText(t, w / 2, h * 0.42); g.font = 'bold 34px Arial, sans-serif'; g.fillText(`PADDLE ${pad(team.no)}`, w / 2, h * 0.82); }, 512, 160, [team.name, team.color, team.no]);
+  const ab = abbr(team.name);
+  const front = useTex((g, w, h) => { g.fillStyle = team.color; g.fillRect(0, 0, w, h); g.fillStyle = 'rgba(0,0,0,.30)'; g.fillRect(0, h * 0.7, w, h * 0.3); g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = `bold 120px ${IMPACT}`; g.fillText(ab, w * 0.3, h * 0.42); g.font = `bold 46px Arial, sans-serif`; g.fillText(String(team.name).toUpperCase().slice(0, 26), w * 0.64, h * 0.3); g.font = `bold 34px Arial, sans-serif`; g.fillText(`PADDLE  #${pad(team.no)}`, w * 0.64, h * 0.56); g.font = '30px Arial, sans-serif'; g.fillText(team.owner || '', w / 2, h * 0.86); }, 1024, 256, [team.color, team.name, team.no, team.owner]);
+  const plate = useTex((g, w, h) => { g.fillStyle = '#f4f1e8'; g.fillRect(0, 0, w, h); g.fillStyle = team.color; g.fillRect(0, 0, w, 18); g.fillStyle = '#111'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = 'bold 56px Arial, sans-serif'; g.fillText(String(team.owner || team.name).toUpperCase().slice(0, 16), w / 2, h * 0.5); g.font = '32px Arial, sans-serif'; g.fillStyle = '#555'; g.fillText(String(team.name).slice(0, 24), w / 2, h * 0.82); }, 512, 160, [team.color, team.name, team.owner]);
   const scr = useRef();
-  useFrame((_, dt) => { if (scr.current) scr.current.emissiveIntensity = damp(scr.current.emissiveIntensity, leading ? 1.8 : 0.3, 6, Math.min(dt, 0.05)); });
+  useFrame((_, dt) => { if (scr.current) scr.current.emissiveIntensity = damp(scr.current.emissiveIntensity, leading ? 1.8 : 0.35, 6, Math.min(dt, 0.05)); });
   return (<group position={[0, 0, TABLE_FWD]}>
-    <mesh position={[0, TABLE_Y, 0]} castShadow receiveShadow><boxGeometry args={[1.9, 0.06, 0.85]} /><meshStandardMaterial color="#3b2212" roughness={0.3} metalness={0.15} /></mesh>
-    <mesh position={[0, TABLE_Y - 0.32, 0.405]} castShadow><boxGeometry args={[1.9, 0.6, 0.03]} /><meshStandardMaterial color="#1a1209" roughness={0.6} /></mesh>
-    <mesh position={[0, TABLE_Y - 0.3, 0.422]}><planeGeometry args={[1.8, 0.56]} /><meshBasicMaterial map={front} toneMapped={false} /></mesh>
-    {[-0.9, 0.9].map((x) => <mesh key={x} position={[x, TABLE_Y / 2 - 0.02, 0]} castShadow><boxGeometry args={[0.05, TABLE_Y - 0.06, 0.8]} /><meshStandardMaterial color="#1a1209" roughness={0.6} /></mesh>)}
-    <mesh position={[0, TABLE_Y + 0.17, -0.05]} rotation={[-0.3, Math.PI, 0]}><boxGeometry args={[0.46, 0.28, 0.025]} /><meshStandardMaterial ref={scr} color="#0a0d18" emissive={team.color} emissiveIntensity={0.3} roughness={0.3} /></mesh>
-    <mesh position={[0.55, TABLE_Y + 0.07, 0.05]}><cylinderGeometry args={[0.035, 0.035, 0.08, 12]} /><meshStandardMaterial color="#d9d9d9" roughness={0.3} metalness={0.4} /></mesh>
+    <mesh position={[0, TABLE_Y, 0]} castShadow receiveShadow><boxGeometry args={[2.5, 0.07, 0.95]} /><meshStandardMaterial color="#4a2a14" roughness={0.28} metalness={0.15} /></mesh>
+    <mesh position={[0, TABLE_Y + 0.036, 0.47]}><boxGeometry args={[2.52, 0.012, 0.03]} /><meshBasicMaterial color={team.color} /></mesh>
+    <mesh position={[0, TABLE_Y - 0.33, 0.44]} castShadow><boxGeometry args={[2.5, 0.62, 0.03]} /><meshStandardMaterial color="#1a1209" roughness={0.6} /></mesh>
+    <mesh position={[0, TABLE_Y - 0.32, 0.458]}><planeGeometry args={[2.4, 0.6]} /><meshBasicMaterial map={front} toneMapped={false} /></mesh>
+    {[-1.18, 1.18].map((x) => <mesh key={x} position={[x, TABLE_Y / 2 - 0.02, 0]} castShadow><boxGeometry args={[0.06, TABLE_Y - 0.06, 0.9]} /><meshStandardMaterial color="#1a1209" roughness={0.6} /></mesh>)}
+    <mesh position={[0, TABLE_Y + 0.2, -0.1]} rotation={[-0.3, Math.PI, 0]}><boxGeometry args={[0.5, 0.31, 0.025]} /><meshStandardMaterial ref={scr} color="#0a0d18" emissive={team.color} emissiveIntensity={0.35} roughness={0.3} /></mesh>
+    <mesh position={[0, TABLE_Y + 0.045, -0.04]}><boxGeometry args={[0.5, 0.02, 0.34]} /><meshStandardMaterial color="#9aa0aa" metalness={0.6} roughness={0.35} /></mesh>
+    <mesh position={[0.85, TABLE_Y + 0.19, 0.15]} rotation={[0, 0.3, 0]}><planeGeometry args={[0.46, 0.14]} /><meshBasicMaterial map={plate} side={THREE.DoubleSide} toneMapped={false} /></mesh>
+    <mesh position={[0.85, TABLE_Y + 0.07, 0.15]} rotation={[0, 0.3, 0]}><boxGeometry args={[0.46, 0.08, 0.02]} /><meshStandardMaterial color="#d9d9d9" roughness={0.3} metalness={0.4} /></mesh>
+    <mesh position={[-0.8, TABLE_Y + 0.15, 0.2]}><cylinderGeometry args={[0.04, 0.04, 0.24, 12]} /><meshStandardMaterial color="#8fd3ff" transparent opacity={0.7} roughness={0.1} /></mesh>
+    <mesh position={[-0.65, TABLE_Y + 0.08, 0.2]}><cylinderGeometry args={[0.035, 0.03, 0.09, 12]} /><meshStandardMaterial color="#dff3ff" transparent opacity={0.6} roughness={0.1} /></mesh>
   </group>);
 }
 
-function Scene({ teams, curBidder, saleKey, screen, labelRefs }) {
+const SHOT_FOV = { wide: 36, table: 30, celebrate: 36, auc: 31, screen: 32 };
+
+function Scene({ teams, curBidder, curBid, fresh, saleKey, screen, labelRefs, camMode, cheer }) {
   const { camera, size } = useThree();
   const n = teams.length, compact = size.width / Math.max(size.height, 1) < 1.3, slots = useMemo(() => slotsFor(n, compact ? 0.7 : 1), [n, compact]);
   const idx = teams.findIndex((t) => t.id === curBidder);
   const light = useRef(), v = useMemo(() => new THREE.Vector3(), []), col = useMemo(() => new THREE.Color(), []);
+  const wide = useRef({ pos: new THREE.Vector3(0, 9, 16), target: new THREE.Vector3(0, 1.4, -2) }).current;
+  const cam = useRef({ look: new THREE.Vector3(0, 1.4, -2), init: false, shot: { kind: 'wide', idx: -1, pr: 0, until: 0 } }).current;
+  const T = useMemo(() => ({ p: new THREE.Vector3(), l: new THREE.Vector3() }), []);
+  const focus = useRef({ x: AUC.x, z: AUC.z }); focus.current = idx >= 0 && slots[idx] ? { x: slots[idx].x, z: slots[idx].z } : { x: AUC.x, z: AUC.z + 4 };
+  const LW = compact ? 6.4 : 11;
 
-  useEffect(() => {   // wide shot: fit AND centre every table, raised paddles, the stage and the LED screen at any card size / team count
-    const t = new THREE.Vector3(0, 1.4, -2), dir = new THREE.Vector3(3, 7.5, 12).normalize(), hw = compact ? 0.62 : 1, lw = compact ? 3.1 : 4.7;
-    const pts = [new THREE.Vector3(-5.6 * hw, 0, AUC.z), new THREE.Vector3(5.6 * hw, 0, AUC.z), new THREE.Vector3(-lw, 6, AUC.z - 2.4), new THREE.Vector3(lw, 6, AUC.z - 2.4)];
-    slots.forEach((s) => { pts.push(new THREE.Vector3(s.tx - 1, 0, s.tz + 0.5), new THREE.Vector3(s.tx + 1, 0, s.tz + 0.5), new THREE.Vector3(s.x, 2.4, s.z)); });
-    const cam = camera.clone(); cam.aspect = size.width / Math.max(size.height, 1); const th = Math.tan(THREE.MathUtils.degToRad(cam.fov / 2)); let d = 18;
+  useEffect(() => {   // wide shot: fit AND centre the stage, LED screen and every table at any card size / team count
+    const t = new THREE.Vector3(0, 1.6, -2), dir = new THREE.Vector3(2.5, 5.2, 12).normalize(), hw = compact ? 0.62 : 1;
+    const pts = [new THREE.Vector3(-7 * hw, 0, AUC.z), new THREE.Vector3(7 * hw, 0, AUC.z), new THREE.Vector3(-LW / 2 - 0.8, 6.8, AUC.z - 2.4), new THREE.Vector3(LW / 2 + 0.8, 6.8, AUC.z - 2.4)];
+    slots.forEach((s) => { pts.push(new THREE.Vector3(s.tx - 1.3, 0, s.tz + 0.6), new THREE.Vector3(s.tx + 1.3, 0, s.tz + 0.6), new THREE.Vector3(s.x, 2.4, s.z)); });
+    const c = camera.clone(); c.fov = SHOT_FOV.wide; c.aspect = size.width / Math.max(size.height, 1); const th = Math.tan(THREE.MathUtils.degToRad(c.fov / 2)); let d = 20;
     const right = new THREE.Vector3(), up = new THREE.Vector3(), tmp = new THREE.Vector3();
     for (let k = 0; k < 16; k++) {
-      cam.position.copy(t).addScaledVector(dir, d); cam.lookAt(t); cam.updateMatrixWorld(); cam.updateProjectionMatrix();
-      let x0 = 9, x1 = -9, y0 = 9, y1 = -9; for (const p of pts) { const q = tmp.copy(p).project(cam); x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); y0 = Math.min(y0, q.y); y1 = Math.max(y1, q.y); }
+      c.position.copy(t).addScaledVector(dir, d); c.lookAt(t); c.updateMatrixWorld(); c.updateProjectionMatrix();
+      let x0 = 9, x1 = -9, y0 = 9, y1 = -9; for (const p of pts) { const q = tmp.copy(p).project(c); x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); y0 = Math.min(y0, q.y); y1 = Math.max(y1, q.y); }
       const w = Math.max((x1 - x0) / 2, (y1 - y0) / 2, 0.05), cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
-      right.setFromMatrixColumn(cam.matrixWorld, 0); up.setFromMatrixColumn(cam.matrixWorld, 1);
-      t.addScaledVector(right, cx * d * th * cam.aspect * 0.8).addScaledVector(up, cy * d * th * 0.8);   // centre the scene in the frame
-      d *= Math.pow(w / 0.92, 0.9);
+      right.setFromMatrixColumn(c.matrixWorld, 0); up.setFromMatrixColumn(c.matrixWorld, 1);
+      t.addScaledVector(right, cx * d * th * c.aspect * 0.8).addScaledVector(up, cy * d * th * 0.8);
+      d *= Math.pow(w / 0.96, 0.9);   // 0.96: the arena fills almost the whole frame
     }
-    camera.position.copy(t).addScaledVector(dir, d); camera.lookAt(t); camera.updateProjectionMatrix();
-  }, [camera, size.width, size.height, slots, compact]);
+    wide.pos.copy(t).addScaledVector(dir, d); wide.target.copy(t);
+    if (!cam.fitted) { cam.fitted = true; cam.init = false; }
+  }, [camera, size.width, size.height, slots, compact, LW]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---- the director: every shot is triggered by a real (server-confirmed) room event ----
+  const setShot = (kind, i, secs, pr) => { const now = performance.now() / 1000, s = cam.shot; if (now < s.until && pr < s.pr) return; cam.shot = { kind, idx: i, pr, until: now + secs }; };
+  useEffect(() => { if (curBidder && idx >= 0) { setShot('table', idx, 1.9, 2); cheer.current = Math.max(cheer.current, 0.1); } }, [curBidder, curBid]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (screen && screen.name) setShot('screen', -1, 2.3, 1); }, [screen && screen.name]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!fresh) return;
+    const w = teams.findIndex((t) => t.id === fresh.fid);
+    if (fresh.status === 'sold' && w >= 0) { setShot('celebrate', w, 3.6, 3); cheer.current = 1; } else { setShot('auc', -1, 2.6, 3); cheer.current = Math.max(cheer.current, 0.25); }
+  }, [fresh]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useFrame((_, dt0) => {
-    const dt = Math.min(dt0, 0.05);
+    const dt = Math.min(dt0, 0.05), now = performance.now() / 1000;
+    let sh = cam.shot; if (now >= sh.until) sh = { kind: 'wide', idx: -1 };
+    if (camMode === 'wide') sh = { kind: 'wide', idx: -1 }; else if (camMode === 'auc') sh = { kind: 'auc', idx: -1 }; else if (camMode === 'screen') sh = { kind: 'screen', idx: -1 };
+    const s = sh.idx >= 0 ? slots[sh.idx] : null;
+    let fov = SHOT_FOV[sh.kind];
+    if (sh.kind === 'table' && s) { const fx = Math.sin(s.yaw), fz = Math.cos(s.yaw), d = compact ? 3.1 : 3.9; T.p.set(s.x + fx * d + fz * 1.0, 2.05, s.z + fz * d - fx * 1.0); T.l.set(s.x + fx * 0.35, 1.3, s.z + fz * 0.35); }
+    else if (sh.kind === 'celebrate' && s) { const fx = Math.sin(s.yaw), fz = Math.cos(s.yaw); T.p.set(s.x + fx * 5.2 + fz * 1.8, 2.7, s.z + fz * 5.2 - fx * 1.8); T.l.set(s.x + fx * 1.2, 1.45, s.z + fz * 1.2); }
+    else if (sh.kind === 'auc') { T.p.set(AUC.x + 1.5, STAGE_Y + 2.2, AUC.z + (compact ? 6.4 : 5.6)); T.l.set(AUC.x - 0.2, STAGE_Y + 2.0, AUC.z - 0.4); }
+    else if (sh.kind === 'screen') { T.p.set(0, 4.4, AUC.z - 2.44 + LW * 1.3); T.l.set(0, 3.95, AUC.z - 2.44); }
+    else { T.p.copy(wide.pos); T.l.copy(wide.target); fov = SHOT_FOV.wide; }
+    if (!cam.init) { camera.position.copy(T.p); cam.look.copy(T.l); camera.fov = fov; cam.init = true; }
+    const k = sh.kind === 'wide' ? 2.0 : 3.2;
+    camera.position.x = damp(camera.position.x, T.p.x, k, dt); camera.position.y = damp(camera.position.y, T.p.y, k, dt); camera.position.z = damp(camera.position.z, T.p.z, k, dt);
+    cam.look.x = damp(cam.look.x, T.l.x, k, dt); cam.look.y = damp(cam.look.y, T.l.y, k, dt); cam.look.z = damp(cam.look.z, T.l.z, k, dt);
+    camera.fov = damp(camera.fov, fov, k, dt); camera.updateProjectionMatrix(); camera.lookAt(cam.look); camera.updateMatrixWorld();
     teams.forEach((t, i) => {   // pin the HTML name tags to the 3D tables
       const el = labelRefs.current[t.id]; if (!el) return;
-      v.set(slots[i].tx, 1.05, slots[i].tz + 0.45).project(camera);
-      el.style.transform = `translate(${((v.x * 0.5 + 0.5) * size.width).toFixed(1)}px, ${((-v.y * 0.5 + 0.5) * size.height).toFixed(1)}px) translate(-50%, -100%)`; el.style.opacity = '1';
+      v.set(slots[i].tx, 1.1, slots[i].tz + 0.5).project(camera);
+      const onScreen = v.z < 1 && Math.abs(v.x) < 1.2 && Math.abs(v.y) < 1.2;
+      el.style.transform = `translate(${((v.x * 0.5 + 0.5) * size.width).toFixed(1)}px, ${((-v.y * 0.5 + 0.5) * size.height).toFixed(1)}px) translate(-50%, -100%)`; el.style.opacity = onScreen ? '1' : '0';
     });
     const L = light.current; if (!L) return;   // coloured spotlight on whoever leads
-    const s = idx >= 0 ? slots[idx] : null;
-    if (s) { L.position.x = damp(L.position.x, s.x, 6, dt); L.position.z = damp(L.position.z, s.z, 6, dt); col.set(teams[idx].color); L.color.lerp(col, 1 - Math.exp(-6 * dt)); }
-    L.intensity = damp(L.intensity, s ? 22 : 0, 5, dt);
+    const sl = idx >= 0 ? slots[idx] : null;
+    if (sl) { L.position.x = damp(L.position.x, sl.x, 6, dt); L.position.z = damp(L.position.z, sl.z, 6, dt); col.set(teams[idx].color); L.color.lerp(col, 1 - Math.exp(-6 * dt)); }
+    L.intensity = damp(L.intensity, sl ? 26 : 0, 5, dt);
   });
 
   return (<>
-    <ambientLight intensity={0.85} /><hemisphereLight args={['#b8c8ff', '#2a2350', 0.9]} />
-    <directionalLight position={[4, 12, 8]} intensity={2.2} castShadow shadow-mapSize={[2048, 2048]} shadow-camera-left={-12} shadow-camera-right={12} shadow-camera-top={12} shadow-camera-bottom={-12} shadow-camera-far={40} shadow-bias={-0.0004} />
-    <pointLight position={[0, 6, AUC.z + 1]} intensity={90} color="#ffb347" distance={14} decay={1.6} />
-    <pointLight position={[-6, 6, 0]} intensity={30} color="#7aa2ff" distance={16} decay={1.6} /><pointLight position={[6, 6, 0]} intensity={30} color="#7aa2ff" distance={16} decay={1.6} />
-    <pointLight ref={light} position={[0, 3, 0]} intensity={0} distance={6} decay={1.5} />
-    <Hall screen={screen} compact={compact} /><Audience />
+    <ambientLight intensity={0.8} /><hemisphereLight args={['#b8c8ff', '#2a2350', 0.9]} />
+    <directionalLight position={[4, 12, 8]} intensity={2.0} castShadow shadow-mapSize={[2048, 2048]} shadow-camera-left={-14} shadow-camera-right={14} shadow-camera-top={14} shadow-camera-bottom={-14} shadow-camera-far={44} shadow-bias={-0.0004} />
+    <pointLight position={[0, 6.5, AUC.z + 2]} intensity={110} color="#ffc266" distance={16} decay={1.6} />
+    <pointLight position={[-4, 5, AUC.z + 3]} intensity={40} color="#ff8a1f" distance={12} decay={1.8} /><pointLight position={[4, 5, AUC.z + 3]} intensity={40} color="#ff8a1f" distance={12} decay={1.8} />
+    <pointLight position={[-7, 6, 0]} intensity={34} color="#7aa2ff" distance={18} decay={1.6} /><pointLight position={[7, 6, 0]} intensity={34} color="#7aa2ff" distance={18} decay={1.6} />
+    <pointLight ref={light} position={[0, 3, 0]} intensity={0} distance={6.5} decay={1.5} />
+    <Hall screen={screen} compact={compact} fresh={fresh} /><Audience cheer={cheer} compact={compact} />
+    {!compact && <><TVCam x={-8} z={-4.6} focus={focus} /><TVCam x={8} z={-4.6} focus={focus} /></>}
     {teams.map((t, i) => <group key={t.id}>
       <group position={[slots[i].x, 0, slots[i].z]} rotation={[0, slots[i].yaw, 0]}><Table team={t} leading={t.id === curBidder} /></group>
       <Person pos={{ x: slots[i].x, z: slots[i].z }} yaw={slots[i].yaw} seated item="paddle" index={i} skin={SKINS[i % 5]} hair={HAIRS[(i * 3) % 5]} suit={new THREE.Color(t.color).multiplyScalar(0.4).getStyle()} tie={t.color} color={t.color} no={t.no} short={abbr(t.name)} target={t.id === curBidder} /></group>)}
-    <Person pos={{ x: AUC.x, y: STAGE_Y, z: AUC.z }} yaw={0} item="gavel" index={7} skin={SKINS[2]} hair={HAIRS[2]} suit="#25262e" tie="#ffb347" color="#ffb347" strikeKey={saleKey} lookAt={idx >= 0 ? { x: slots[idx].x, z: slots[idx].z } : null} />
+    <Person pos={{ x: AUC.x, y: STAGE_Y, z: AUC.z }} yaw={0} scale={1.25} item="gavel" index={7} skin={SKINS[2]} hair={HAIRS[2]} suit="#25262e" tie="#ffb347" color="#ffb347" strikeKey={saleKey} lookAt={idx >= 0 ? { x: slots[idx].x, z: slots[idx].z } : null} />
   </>);
 }
 
 /**
- * teams: [{id, name, color, no, owner, purse, squad}] in room order.  curBidder: franchise id of the highest bidder (null = none).
- * curBid: its amount in lakh.  saleKey: changes when a player is sold/unsold (triggers the gavel).
- * screen: data for the LED screen {name, role, country, base, bid, bidder, bidderColor}.  panel: compact info node for phones.
+ * teams: [{id, name, color, no, owner, purse, squad}] in room order.  curBidder / curBid: server-confirmed highest bidder + amount.
+ * sale: latest server-confirmed result {key, status, fid, player, team, price, color} - a SOLD/UNSOLD card + celebration shot is
+ * shown only when this changes AFTER the page loaded.   screen: LED data (see drawLED).   topbar / panel (lower third) / controls: HTML overlays.
  */
-export default function BidderStage({ teams = [], curBidder = null, curBid = 0, saleKey = '', screen = null, panel = null, controls = null, className = 'h-[500px] sm:h-[560px] lg:h-[calc(100vh-170px)] lg:min-h-[560px]' }) {
-  const [ok, setOk] = useState(false);
-  const labelRefs = useRef({});
+export default function BidderStage({ teams = [], curBidder = null, curBid = 0, sale = null, screen = null, topbar = null, panel = null, controls = null, className = 'h-[500px] sm:h-[560px] lg:h-[calc(100vh-110px)] lg:min-h-[560px]' }) {
+  const [ok, setOk] = useState(false), [camMode, setCamMode] = useState('auto'), [fresh, setFresh] = useState(null);
+  const labelRefs = useRef({}), cheer = useRef(0), seen = useRef(sale ? sale.key : null);
   useEffect(() => { try { const c = document.createElement('canvas'); setOk(!!(c.getContext('webgl2') || c.getContext('webgl'))); } catch (e) { setOk(false); } }, []);
+  useEffect(() => {   // new server-confirmed result since the page opened (history on first load is ignored; safe under React StrictMode)
+    if (!sale || !sale.key || sale.key === seen.current) return undefined;
+    seen.current = sale.key; setFresh(sale);
+    const tm = setTimeout(() => setFresh(null), 4600); return () => clearTimeout(tm);
+  }, [sale && sale.key]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!ok || !teams.length) return null;   // no WebGL: the normal auction screen still works
-  return (<div className="card relative select-none overflow-hidden" style={{ padding: 0 }}>
+  const MODES = [['auto', '🎥 Auto'], ['wide', 'Wide'], ['auc', 'Auctioneer'], ['screen', 'Screen']];
+  return (<div className="relative select-none overflow-hidden rounded-2xl border border-white/10 bg-[#050a22]" style={{ padding: 0 }}>
     <div className={className} style={{ touchAction: 'pan-y' }}>
-      <Canvas shadows dpr={[1, 1.75]} camera={{ fov: 34, position: [0, 9, 16] }} gl={{ antialias: true }}>
-        <Scene teams={teams} curBidder={curBidder} saleKey={saleKey} screen={screen} labelRefs={labelRefs} />
+      <Canvas shadows dpr={[1, 1.75]} camera={{ fov: 36, position: [0, 9, 16] }} gl={{ antialias: true }}>
+        <Scene teams={teams} curBidder={curBidder} curBid={curBid} fresh={fresh} saleKey={sale ? sale.key : ''} screen={screen} labelRefs={labelRefs} camMode={camMode} cheer={cheer} />
       </Canvas>
     </div>
     <div className="pointer-events-none absolute inset-0 overflow-hidden">
       {teams.map((t) => { const lead = t.id === curBidder; return (
         <div key={t.id} ref={(el) => { labelRefs.current[t.id] = el; }} className="absolute left-0 top-0" style={{ opacity: 0, willChange: 'transform' }}>
           <div className="flex flex-col items-center gap-0.5">
-            {lead && <div key={curBid} className="pop rounded-full px-2 py-0.5 text-sm font-extrabold text-white shadow-lg sm:text-base" style={{ background: t.color, boxShadow: `0 0 16px ${t.color}` }}>{cr(curBid)}</div>}
-            <div className="flex items-center gap-1 rounded-lg border bg-black/70 px-1 py-0.5 text-[10px] backdrop-blur sm:gap-1.5 sm:px-1.5 sm:text-xs" style={{ borderColor: lead ? t.color : 'rgba(255,255,255,.18)', boxShadow: lead ? `0 0 14px ${t.color}` : 'none' }}>
-              <Logo team={t.name} size={20} />
+            {lead && <div key={curBid} className="pop rounded-full px-2.5 py-0.5 text-sm font-extrabold text-white shadow-lg sm:text-lg" style={{ background: t.color, boxShadow: `0 0 18px ${t.color}` }}>{cr(curBid)}</div>}
+            <div className="flex items-center gap-1 rounded-lg border bg-black/75 px-1.5 py-0.5 text-[10px] backdrop-blur sm:gap-2 sm:px-2 sm:py-1 sm:text-xs" style={{ borderColor: lead ? t.color : 'rgba(255,255,255,.18)', boxShadow: lead ? `0 0 16px ${t.color}` : 'none' }}>
+              <Logo team={t.name} size={24} />
               <div className="leading-tight"><div className="font-bold uppercase">{abbr(t.name)} <span className="rounded bg-white px-1 text-black">#{pad(t.no)}</span></div>
-                {t.owner ? <div className="hidden max-w-[90px] truncate text-slate-300 sm:block">{t.owner}</div> : null}
+                {t.owner ? <div className="hidden max-w-[110px] truncate text-slate-300 sm:block">{t.owner}</div> : null}
                 {t.purse != null ? <div className="hidden text-[10px] text-amber-300 sm:block">{cr(t.purse)} · {t.squad ?? 0} players</div> : null}</div>
             </div>
           </div>
         </div>); })}
     </div>
-    {panel && <div className="pointer-events-none absolute left-1/2 top-2 z-10 -translate-x-1/2 lg:left-3 lg:translate-x-0">{panel}</div>}
-    {controls && <div className="pointer-events-none absolute bottom-3 left-1/2 z-10 -translate-x-1/2">{controls}</div>}
+    {topbar && <div className="pointer-events-none absolute left-3 top-3 z-10">{topbar}</div>}
+    <div className="absolute right-3 top-3 z-20 flex gap-1">{MODES.map(([k, l]) => <button key={k} onClick={() => setCamMode(k)} className={`rounded-md px-2 py-1 text-[11px] font-bold uppercase tracking-wide backdrop-blur ${camMode === k ? 'bg-amber-400 text-black' : 'bg-black/60 text-slate-200 hover:bg-black/80'}`}>{l}</button>)}</div>
+    {panel && <div className="pointer-events-none absolute bottom-[84px] left-3 z-10 max-w-[calc(100%-1.5rem)] sm:bottom-3 sm:max-w-[58%]">{panel}</div>}
+    {controls && <div className="pointer-events-none absolute bottom-3 left-1/2 z-10 -translate-x-1/2 sm:left-auto sm:right-3 sm:translate-x-0">{controls}</div>}
   </div>);
 }
