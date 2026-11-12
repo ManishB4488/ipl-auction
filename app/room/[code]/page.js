@@ -6,6 +6,9 @@ import { squadImage, leaderboardImage, shareBlob } from '../../shareimage';
 import { useLineup, XiMini, XiEditor, XiShowcase, QuickSlot, baseRating } from '../../lineup';
 import { LeagueTab } from '../../league';
 import { MatchTab } from '../../match';
+import dynamic from 'next/dynamic';
+
+const BidderStage = dynamic(() => import('../../bidder'), { ssr: false });   // 3D bidder (three.js) loads only in the browser
 
 const inc = (c) => (c < 100 ? 5 : c < 200 ? 10 : c < 500 ? 20 : 25);
 const wikiCache = {};
@@ -370,7 +373,16 @@ function Live({ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act, autos,
   const done = rps.filter((x) => x.status === 'sold' || x.status === 'unsold').length;
   const total = rps.length, sold = rps.filter((x) => x.status === 'sold').length;
   const myBids = bids.filter((b) => cur && b.rp_id === cur.id);
+  // 3D auction room: driven only by authoritative room state (cur_bidder / cur_bid / last sale), never by button clicks
+  const live = room.status === 'live' || room.status === 'paused';
+  const hi = live && room.cur_bidder ? FR[room.cur_bidder] : null;
+  const panel = p ? (<div className="flex items-center gap-2 rounded-xl border border-white/15 bg-black/70 px-2 py-1.5 backdrop-blur sm:gap-3 sm:px-3">
+    <Photo name={p.name} size={44} />
+    <div className="min-w-0"><div className="max-w-[120px] truncate font-display text-sm font-bold uppercase leading-tight sm:max-w-[200px] sm:text-xl">{p.name}</div><div className="text-[10px] text-slate-300 sm:text-xs">{p.role} · Base {cr(cur.base_lakh)}</div></div>
+    <div className="text-right"><div className="text-[9px] uppercase tracking-widest text-slate-400">Current bid</div><div className="score text-lg font-extrabold text-amber-400 sm:text-2xl">{hi ? cr(room.cur_bid) : '—'}</div><div className="max-w-[90px] truncate text-[10px] sm:max-w-[140px] sm:text-xs" style={{ color: hi?.color }}>{hi ? hi.team : 'No bids yet'}</div></div></div>) : null;
+  const stage = <BidderStage teams={fr.map((f, i) => ({ id: f.id, name: f.team, color: f.color || '#ff8a1f', no: i + 1, owner: f.owner || '' }))} curBidder={hi ? hi.id : null} curBid={room.cur_bid || 0} saleKey={last ? String(last.sold_at || last.id) : ''} panel={panel} />;
   return (<div className="grid gap-4 lg:grid-cols-3">
+    <div className="lg:col-span-3">{stage}</div>
     <div className="lg:col-span-2 space-y-4">
       {last && <div key={last.id} className="pop flex items-center justify-center gap-3 rounded-xl border border-white/10 p-3 text-center font-display text-xl font-bold uppercase tracking-wide" style={{ background: last.status === 'sold' ? `linear-gradient(90deg, ${FR[last.sold_to]?.color || '#16a34a'}99, #16a34a33 70%)` : 'linear-gradient(90deg, #dc262699, #dc262622 70%)' }}><Photo name={P[last.player_id]?.name || '?'} size={56} />
         {last.status === 'sold' ? `🔨 SOLD! ${P[last.player_id]?.name} → ${FR[last.sold_to]?.team} for ${cr(last.sold_lakh)}` : `❌ UNSOLD: ${P[last.player_id]?.name}`}</div>}
