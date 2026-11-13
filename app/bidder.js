@@ -48,7 +48,7 @@ function useTex(draw, w, h, deps) {
 const Mat = ({ c, r = 0.75, m = 0 }) => <meshStandardMaterial color={c} roughness={r} metalness={m} />;
 
 // ---------- a person (seated owner or standing auctioneer) ----------
-function Person({ pos, yaw, scale = 1, seated, item, skin, hair, suit, tie, index, target, no, short, color, strikeKey, lookAt }) {
+function Person({ pos, yaw, scale = 1, shadow = true, seated, item, skin, hair, suit, tie, index, target, no, short, color, strikeKey, lookAt }) {
   const root = useRef(), body = useRef(), head = useRef(), lidL = useRef(), lidR = useRef(), armR = useRef(), elbR = useRef(), handR = useRef(), held = useRef(), armL = useRef(), elbL = useRef();
   const live = useRef(); live.current = { target, strikeKey, lookAt };
   const st = useRef({ r: 0, seen: undefined, gStart: -100, look: 0, nextBlink: 1.5 + index * 0.8, blinkAt: -1 }).current;
@@ -61,12 +61,13 @@ function Person({ pos, yaw, scale = 1, seated, item, skin, hair, suit, tie, inde
     g.fillStyle = color; g.font = 'bold 46px Arial, sans-serif'; g.fillText(short || '', 128, 190);
   }, 256, 256, [no, short, color]);
   const badge = useTex((g, w, h) => { g.fillStyle = color; g.fillRect(0, 0, w, h); g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = `bold ${short && short.length > 3 ? 34 : 42}px Arial, sans-serif`; g.fillText(short || '', 64, 35); }, 128, 64, [short, color]);
-  useEffect(() => { root.current.traverse((o) => { if (o.isMesh) o.castShadow = true; }); }, []);
+  useEffect(() => { root.current.traverse((o) => { if (o.isMesh) o.castShadow = shadow; }); }, [shadow]);
 
   useFrame((state, dt0) => {
     const dt = Math.min(dt0, 0.05), L = live.current, t = state.clock.elapsedTime + index * 1.7, now = performance.now() / 1000;
     let r;
     if (item === 'paddle') { st.r = damp(st.r, L.target ? 1 : 0, L.target ? 9 : 6, dt); r = st.r; }
+    else if (item === 'idle') r = 0;   // franchise team members: seated, watching the auctioneer, never bid
     else {
       if (st.seen === undefined) st.seen = L.strikeKey; else if (L.strikeKey !== st.seen) { st.seen = L.strikeKey; st.gStart = now; }   // new sale/unsold => gavel
       r = gavelAmount(now - st.gStart) * 0.8;
@@ -75,7 +76,7 @@ function Person({ pos, yaw, scale = 1, seated, item, skin, hair, suit, tie, inde
     body.current.scale.y = 1 + Math.sin(t * 1.6) * 0.012;
     root.current.rotation.y = Math.sin(t * 0.45) * 0.04;
     root.current.rotation.z = Math.sin(t * 0.8) * 0.008 - 0.02 * r;
-    const aim = item === 'paddle' ? AUC : L.lookAt;   // owners watch the auctioneer; the auctioneer watches the latest bidder
+    const aim = item === 'gavel' ? L.lookAt : AUC;   // owners watch the auctioneer; the auctioneer watches the latest bidder
     const want = aim ? clamp(wrap(Math.atan2(aim.x - pos.x, aim.z - pos.z) - yaw), -1.1, 1.1) : 0;
     st.look = damp(st.look, want, 4, dt);
     head.current.rotation.y = st.look + Math.sin(t * 0.7) * 0.07;
@@ -85,7 +86,7 @@ function Person({ pos, yaw, scale = 1, seated, item, skin, hair, suit, tie, inde
     if (st.blinkAt >= 0) { const k = (t - st.blinkAt) / 0.16; if (k < 1) s = Math.sin(k * Math.PI); else { st.blinkAt = -1; st.nextBlink = t + 2 + Math.random() * 3.5; } }
     for (const l of [lidL.current, lidR.current]) { l.visible = s > 0.04; l.scale.y = Math.max(s, 0.001); }
     // arms
-    const a = armPose(r, item);
+    const a = armPose(r, item === 'idle' ? 'paddle' : item);
     armR.current.rotation.set(a.sx, 0, a.sz + Math.sin(t * 9) * 0.03 * (item === 'paddle' ? r : 0));
     elbR.current.rotation.set(a.ex, 0, 0);
     armL.current.rotation.set(-0.15 + Math.sin(t * 0.9) * 0.03, 0, -0.1);
@@ -123,7 +124,7 @@ function Person({ pos, yaw, scale = 1, seated, item, skin, hair, suit, tie, inde
             <mesh position={[0, 0.3, 0]} scale={[1.35, 1, 0.78]}><capsuleGeometry args={[0.19, 0.4, 8, 20]} /><Mat c={suitC} /></mesh>
             <mesh position={[0, 0.5, 0.15]} rotation={[0.1, 0, 0]}><boxGeometry args={[0.14, 0.3, 0.02]} /><Mat c="#f2f2f2" /></mesh>
             <mesh position={[0, 0.44, 0.165]}><boxGeometry args={[0.045, 0.3, 0.015]} /><Mat c={tie} r={0.5} /></mesh>
-            {item === 'paddle' && <mesh position={[-0.12, 0.34, 0.152]}><planeGeometry args={[0.12, 0.06]} /><meshBasicMaterial map={badge} /></mesh>}
+            {item !== 'gavel' && <mesh position={[-0.12, 0.34, 0.152]}><planeGeometry args={[0.12, 0.06]} /><meshBasicMaterial map={badge} /></mesh>}
           </group>
           <mesh position={[0, 1.6, 0]}><cylinderGeometry args={[0.06, 0.065, 0.12, 12]} /><Mat c={skin} /></mesh>
           <group ref={head} position={[0, 1.76, 0]}>
@@ -152,7 +153,7 @@ function Person({ pos, yaw, scale = 1, seated, item, skin, hair, suit, tie, inde
               <group ref={handR} position={[0, -fore - 0.02, 0]}>
                 <mesh><sphereGeometry args={[0.042, 14, 12]} /><Mat c={skin} /></mesh>
                 <group ref={held}>
-                  {item === 'paddle' ? <>
+                  {item === 'idle' ? null : item === 'paddle' ? <>
                     <mesh position={[0, 0.1, 0]}><cylinderGeometry args={[0.014, 0.014, 0.3, 8]} /><Mat c="#6b4a2b" /></mesh>
                     <mesh position={[0, 0.42, 0]}><circleGeometry args={[0.17, 40]} /><meshBasicMaterial map={padTex} toneMapped={false} /></mesh>
                     <mesh position={[0, 0.42, -0.002]} rotation={[0, Math.PI, 0]}><circleGeometry args={[0.17, 40]} /><meshBasicMaterial map={padTex} toneMapped={false} /></mesh>
@@ -420,22 +421,26 @@ function Table({ team, leading }) {
 }
 
 const SHOT_FOV = { wide: 36, table: 30, celebrate: 36, auc: 31, screen: 32 };
+const DUR = { wide: 1.8, table: 1.1, celebrate: 1.3, auc: 1.4, screen: 1.5 };   // seconds each camera move takes
+const PUSH = { screen: 0.15, table: 0.08, celebrate: 0.1, auc: 0.06 };         // how far each shot slowly pushes in
+const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 
-function Scene({ teams, curBidder, curBid, fresh, saleKey, screen, labelRefs, camMode, cheer }) {
+function Scene({ teams, curBidder, curBid, fresh, saleKey, screen, labelRefs, camMode, cheer, call, lotKey, onShot }) {
   const { camera, size } = useThree();
   const n = teams.length, compact = size.width / Math.max(size.height, 1) < 1.3, slots = useMemo(() => slotsFor(n, compact ? 0.7 : 1), [n, compact]);
   const idx = teams.findIndex((t) => t.id === curBidder);
   const light = useRef(), v = useMemo(() => new THREE.Vector3(), []), col = useMemo(() => new THREE.Color(), []);
   const wide = useRef({ pos: new THREE.Vector3(0, 9, 16), target: new THREE.Vector3(0, 1.4, -2) }).current;
-  const cam = useRef({ look: new THREE.Vector3(0, 1.4, -2), init: false, shot: { kind: 'wide', idx: -1, pr: 0, until: 0 } }).current;
-  const T = useMemo(() => ({ p: new THREE.Vector3(), l: new THREE.Vector3() }), []);
+  const cam = useRef({ look: new THREE.Vector3(0, 1.4, -2), init: false, id: '', t0: 0, dur: 1.2, from: { p: new THREE.Vector3(), l: new THREE.Vector3(), fov: 36 } }).current;
+  const T = useMemo(() => ({ p: new THREE.Vector3(), l: new THREE.Vector3(), d: new THREE.Vector3() }), []);
+  const teamsRef = useRef(teams); teamsRef.current = teams;
   const focus = useRef({ x: AUC.x, z: AUC.z }); focus.current = idx >= 0 && slots[idx] ? { x: slots[idx].x, z: slots[idx].z } : { x: AUC.x, z: AUC.z + 4 };
   const LW = compact ? 6.4 : 11;
 
   useEffect(() => {   // wide shot: fit AND centre the stage, LED screen and every table at any card size / team count
     const t = new THREE.Vector3(0, 1.6, -2), dir = new THREE.Vector3(2.5, 5.2, 12).normalize(), hw = compact ? 0.62 : 1;
     const pts = [new THREE.Vector3(-7 * hw, 0, AUC.z), new THREE.Vector3(7 * hw, 0, AUC.z), new THREE.Vector3(-LW / 2 - 0.8, 6.8, AUC.z - 2.4), new THREE.Vector3(LW / 2 + 0.8, 6.8, AUC.z - 2.4)];
-    slots.forEach((s) => { pts.push(new THREE.Vector3(s.tx - 1.3, 0, s.tz + 0.6), new THREE.Vector3(s.tx + 1.3, 0, s.tz + 0.6), new THREE.Vector3(s.x, 2.4, s.z)); });
+    slots.forEach((s) => { pts.push(new THREE.Vector3(s.tx - 1.3, 0, s.tz + 0.6), new THREE.Vector3(s.tx + 1.3, 0, s.tz + 0.6), new THREE.Vector3(s.x, 2.4, s.z), new THREE.Vector3(s.x - 0.6, 0, s.z + 0.9), new THREE.Vector3(s.x + 0.6, 0, s.z + 0.9)); });   // incl. the chair behind each rep so the nearest table is never cut off
     const c = camera.clone(); c.fov = SHOT_FOV.wide; c.aspect = size.width / Math.max(size.height, 1); const th = Math.tan(THREE.MathUtils.degToRad(c.fov / 2)); let d = 20;
     const right = new THREE.Vector3(), up = new THREE.Vector3(), tmp = new THREE.Vector3();
     for (let k = 0; k < 16; k++) {
@@ -450,32 +455,80 @@ function Scene({ teams, curBidder, curBid, fresh, saleKey, screen, labelRefs, ca
     if (!cam.fitted) { cam.fitted = true; cam.init = false; }
   }, [camera, size.width, size.height, slots, compact, LW]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ---- the director: every shot is triggered by a real (server-confirmed) room event ----
-  const setShot = (kind, i, secs, pr) => { const now = performance.now() / 1000, s = cam.shot; if (now < s.until && pr < s.pr) return; cam.shot = { kind, idx: i, pr, until: now + secs }; };
-  useEffect(() => { if (curBidder && idx >= 0) { setShot('table', idx, 1.9, 2); cheer.current = Math.max(cheer.current, 0.1); } }, [curBidder, curBid]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (screen && screen.name) setShot('screen', -1, 2.3, 1); }, [screen && screen.name]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
+  // ---- BROADCAST DIRECTOR ------------------------------------------------------------------------------------------
+  // Every cut in Auto is requested by a REAL room event: a server-accepted bid, a new lot, a going-once/twice/final call, or a sale the
+  // server has confirmed. Rules: each shot is held a minimum time; a more important event may cut in only after a short dwell; anything
+  // else waits in a one-slot queue and is dropped if it goes stale; repeated Realtime/poll echoes of the same state never cut again.
+  // Manual modes (Wide / Auctioneer / Bidder / Player) switch the director off until Auto is selected again.
+  const MIN_DWELL = 1.4, PR = { wide: 0, auc: 1, screen: 2, table: 3, celebrate: 4 };
+  const camModeRef = useRef(camMode); camModeRef.current = camMode;
+  const dir = useRef({ cur: { kind: 'wide', tid: null, since: 0, until: Infinity, pr: 0 }, pend: null, lot: lotKey, bid: { lot: lotKey, amt: curBid || 0, who: curBidder } }).current;   // starts from the state at page load: no cut for history
+  const nowS = () => performance.now() / 1000;
+  const startShot = (r, now) => { dir.cur = { kind: r.kind, tid: r.tid, since: now, until: now + r.hold, pr: r.pr }; if (dir.pend && dir.pend.pr <= r.pr) dir.pend = null; };
+  const request = (kind, tid, hold, ttl) => {
+    if (camModeRef.current !== 'auto') return;
+    const now = nowS(), c = dir.cur, pr = PR[kind], r = { kind, tid, hold, pr, ttl: now + ttl };
+    if (c.kind === 'wide') { startShot(r, now); return; }
+    if (c.kind === kind && c.tid === tid) { c.until = Math.max(c.until, now + hold); return; }   // same shot: extend it, no new cut
+    if ((pr > c.pr || now >= c.until) && now - c.since >= (pr >= 4 ? 0.6 : MIN_DWELL)) startShot(r, now);
+    else if (!dir.pend || pr >= dir.pend.pr) dir.pend = r;
+  };
+  const tick = (now) => {
+    const c = dir.cur, p = dir.pend;
+    if (c.kind !== 'wide' && now >= c.until) { if (p && p.ttl > now) startShot(p, now); else { dir.pend = null; dir.cur = { kind: 'wide', tid: null, since: now, until: Infinity, pr: 0 }; } }
+    else if (p && p.pr > c.pr && now - c.since >= (p.pr >= 4 ? 0.6 : MIN_DWELL)) { if (p.ttl > now) startShot(p, now); else dir.pend = null; }
+  };
+  useEffect(() => { dir.cur = { kind: 'wide', tid: null, since: nowS(), until: Infinity, pr: 0 }; dir.pend = null; }, [camMode]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {   // a new player on the block (server state), once per lot
+    if (!lotKey || dir.lot === lotKey) return;
+    dir.lot = lotKey; dir.bid = { lot: lotKey, amt: 0, who: null };
+    request('screen', null, 2.9, 3.2);
+  }, [lotKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {   // a valid, server-accepted bid: a new highest amount in the current lot from a seated franchise
+    if (!lotKey || !curBidder || !teams.some((t) => t.id === curBidder)) return;
+    const b = dir.bid;
+    if (b.lot === lotKey && b.who === curBidder && curBid <= b.amt) return;   // repeated Realtime / poll echo
+    if (b.lot === lotKey && curBid < b.amt) return;                            // a lower amount is an undo, not a new bid
+    dir.bid = { lot: lotKey, amt: curBid, who: curBidder };
+    cheer.current = Math.max(cheer.current, 0.1);
+    request('table', curBidder, 2.4, 3);
+  }, [lotKey, curBidder, curBid]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (call && call !== 'Any bids?') request('auc', null, 2.2, 1.5); }, [call]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {   // sale confirmed by the backend
     if (!fresh) return;
-    const w = teams.findIndex((t) => t.id === fresh.fid);
-    if (fresh.status === 'sold' && w >= 0) { setShot('celebrate', w, 3.6, 3); cheer.current = 1; } else { setShot('auc', -1, 2.6, 3); cheer.current = Math.max(cheer.current, 0.25); }
+    if (fresh.status === 'sold' && teams.some((t) => t.id === fresh.fid)) { request('celebrate', fresh.fid, 3.4, 6); cheer.current = 1; } else { request('auc', null, 2.6, 6); cheer.current = Math.max(cheer.current, 0.25); }
   }, [fresh]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useFrame((_, dt0) => {
-    const dt = Math.min(dt0, 0.05), now = performance.now() / 1000;
-    let sh = cam.shot; if (now >= sh.until) sh = { kind: 'wide', idx: -1 };
-    if (camMode === 'wide') sh = { kind: 'wide', idx: -1 }; else if (camMode === 'auc') sh = { kind: 'auc', idx: -1 }; else if (camMode === 'screen') sh = { kind: 'screen', idx: -1 };
-    const s = sh.idx >= 0 ? slots[sh.idx] : null;
-    let fov = SHOT_FOV[sh.kind];
-    if (sh.kind === 'table' && s) { const fx = Math.sin(s.yaw), fz = Math.cos(s.yaw), d = compact ? 3.1 : 3.9; T.p.set(s.x + fx * d + fz * 1.0, 2.05, s.z + fz * d - fx * 1.0); T.l.set(s.x + fx * 0.35, 1.3, s.z + fz * 0.35); }
-    else if (sh.kind === 'celebrate' && s) { const fx = Math.sin(s.yaw), fz = Math.cos(s.yaw); T.p.set(s.x + fx * 5.2 + fz * 1.8, 2.7, s.z + fz * 5.2 - fx * 1.8); T.l.set(s.x + fx * 1.2, 1.45, s.z + fz * 1.2); }
-    else if (sh.kind === 'auc') { T.p.set(AUC.x + 1.5, STAGE_Y + 2.2, AUC.z + (compact ? 6.4 : 5.6)); T.l.set(AUC.x - 0.2, STAGE_Y + 2.0, AUC.z - 0.4); }
-    else if (sh.kind === 'screen') { T.p.set(0, 4.4, AUC.z - 2.44 + LW * 1.3); T.l.set(0, 3.95, AUC.z - 2.44); }
-    else { T.p.copy(wide.pos); T.l.copy(wide.target); fov = SHOT_FOV.wide; }
-    if (!cam.init) { camera.position.copy(T.p); cam.look.copy(T.l); camera.fov = fov; cam.init = true; }
-    const k = sh.kind === 'wide' ? 2.0 : 3.2;
-    camera.position.x = damp(camera.position.x, T.p.x, k, dt); camera.position.y = damp(camera.position.y, T.p.y, k, dt); camera.position.z = damp(camera.position.z, T.p.z, k, dt);
-    cam.look.x = damp(cam.look.x, T.l.x, k, dt); cam.look.y = damp(cam.look.y, T.l.y, k, dt); cam.look.z = damp(cam.look.z, T.l.z, k, dt);
-    camera.fov = damp(camera.fov, fov, k, dt); camera.updateProjectionMatrix(); camera.lookAt(cam.look); camera.updateMatrixWorld();
+    const dt = Math.min(dt0, 0.05), now = nowS();
+    if (camMode === 'auto') tick(now);
+    let sh;
+    if (camMode === 'auto') sh = dir.cur;
+    else if (camMode === 'auc') sh = { kind: 'auc' };
+    else if (camMode === 'player') sh = { kind: 'screen' };
+    else if (camMode === 'bidder') { const tid = curBidder || (fresh && fresh.status === 'sold' ? fresh.fid : null); sh = tid ? { kind: 'table', tid } : { kind: 'wide' }; }   // no bidder yet: back to wide
+    else sh = { kind: 'wide' };
+    const withTeam = sh.kind === 'table' || sh.kind === 'celebrate';
+    const ti = withTeam ? teamsRef.current.findIndex((t) => t.id === sh.tid) : -1, s = ti >= 0 ? slots[ti] : null;
+    const kind = withTeam && !s ? 'wide' : sh.kind, id = kind + ':' + (s ? sh.tid : '');
+    let fov = SHOT_FOV[kind];
+    if (kind === 'table') { const fx = Math.sin(s.yaw), fz = Math.cos(s.yaw), d = compact ? 3.1 : 3.9; T.p.set(s.x + fx * d + fz * 1.0, 2.05, s.z + fz * d - fx * 1.0); T.l.set(s.x + fx * 0.35, 1.3, s.z + fz * 0.35); }
+    else if (kind === 'celebrate') { const fx = Math.sin(s.yaw), fz = Math.cos(s.yaw); T.p.set(s.x + fx * 5.2 + fz * 1.8, 2.7, s.z + fz * 5.2 - fx * 1.8); T.l.set(s.x + fx * 1.2, 1.45, s.z + fz * 1.2); }
+    else if (kind === 'auc') { T.p.set(AUC.x + 1.5, STAGE_Y + 2.2, AUC.z + (compact ? 6.4 : 5.6)); T.l.set(AUC.x - 0.2, STAGE_Y + 2.0, AUC.z - 0.4); }
+    else if (kind === 'screen') { T.p.set(0, 4.4, AUC.z - 2.44 + LW * 1.3); T.l.set(0, 3.95, AUC.z - 2.44); }
+    else { T.p.copy(wide.pos); T.l.copy(wide.target); }
+    if (id !== cam.id) {   // a cut: remember where the camera is NOW and ease from there
+      cam.from.p.copy(camera.position); cam.from.l.copy(cam.look); cam.from.fov = camera.fov; cam.t0 = now; cam.id = id; cam.dur = DUR[kind];
+      if (!cam.init) { cam.from.p.copy(T.p); cam.from.l.copy(T.l); cam.from.fov = fov; cam.t0 = now - 10; cam.init = true; }
+      if (onShot) onShot({ kind, tid: s ? sh.tid : null });
+    }
+    if (!cam.init) { cam.init = true; cam.from.p.copy(T.p); cam.from.l.copy(T.l); cam.from.fov = fov; cam.t0 = now - 10; }
+    const push = ease(clamp((now - cam.t0) / 4, 0, 1)), pf = PUSH[kind];   // slow push-in (zoom) while a shot is held
+    if (pf) { T.d.copy(T.p).sub(T.l); T.p.copy(T.l).addScaledVector(T.d, 1 + pf * (1 - push)); }
+    if (kind === 'screen') fov += (1 - push) * 4;
+    const e = ease(clamp((now - cam.t0) / cam.dur, 0, 1));
+    camera.position.lerpVectors(cam.from.p, T.p, e); cam.look.lerpVectors(cam.from.l, T.l, e); camera.fov = lerp(cam.from.fov, fov, e);
+    camera.updateProjectionMatrix(); camera.lookAt(cam.look); camera.updateMatrixWorld();
     teams.forEach((t, i) => {   // pin the HTML name tags to the 3D tables
       const el = labelRefs.current[t.id]; if (!el) return;
       v.set(slots[i].tx, 1.1, slots[i].tz + 0.5).project(camera);
@@ -499,7 +552,9 @@ function Scene({ teams, curBidder, curBid, fresh, saleKey, screen, labelRefs, ca
     {!compact && <><TVCam x={-8} z={-4.6} focus={focus} /><TVCam x={8} z={-4.6} focus={focus} /></>}
     {teams.map((t, i) => <group key={t.id}>
       <group position={[slots[i].x, 0, slots[i].z]} rotation={[0, slots[i].yaw, 0]}><Table team={t} leading={t.id === curBidder} /></group>
-      <Person pos={{ x: slots[i].x, z: slots[i].z }} yaw={slots[i].yaw} seated item="paddle" index={i} skin={SKINS[i % 5]} hair={HAIRS[(i * 3) % 5]} suit={new THREE.Color(t.color).multiplyScalar(0.4).getStyle()} tie={t.color} color={t.color} no={t.no} short={abbr(t.name)} target={t.id === curBidder} /></group>)}
+      <Person pos={{ x: slots[i].x, z: slots[i].z }} yaw={slots[i].yaw} seated item="paddle" index={i} skin={SKINS[i % 5]} hair={HAIRS[(i * 3) % 5]} suit={new THREE.Color(t.color).multiplyScalar(0.4).getStyle()} tie={t.color} color={t.color} no={t.no} short={abbr(t.name)} target={t.id === curBidder} />
+      {(compact ? [0.85] : [-0.85, 0.85]).map((lx, k) => <Person key={k} pos={{ x: slots[i].x + lx * Math.cos(slots[i].yaw), z: slots[i].z - lx * Math.sin(slots[i].yaw) }} yaw={slots[i].yaw} seated item="idle" shadow={false} index={20 + i * 3 + k} skin={SKINS[(i + k + 2) % 5]} hair={HAIRS[(i * 2 + k + 1) % 5]} suit={new THREE.Color(t.color).multiplyScalar(0.55).getStyle()} tie="#f2f2f2" color={t.color} no={t.no} short={abbr(t.name)} />)}
+    </group>)}
     <Person pos={{ x: AUC.x, y: STAGE_Y, z: AUC.z }} yaw={0} scale={1.25} item="gavel" index={7} skin={SKINS[2]} hair={HAIRS[2]} suit="#25262e" tie="#ffb347" color="#ffb347" strikeKey={saleKey} lookAt={idx >= 0 ? { x: slots[idx].x, z: slots[idx].z } : null} />
   </>);
 }
@@ -509,8 +564,8 @@ function Scene({ teams, curBidder, curBid, fresh, saleKey, screen, labelRefs, ca
  * sale: latest server-confirmed result {key, status, fid, player, team, price, color} - a SOLD/UNSOLD card + celebration shot is
  * shown only when this changes AFTER the page loaded.   screen: LED data (see drawLED).   topbar / panel (lower third) / controls: HTML overlays.
  */
-export default function BidderStage({ teams = [], curBidder = null, curBid = 0, sale = null, screen = null, topbar = null, panel = null, controls = null, className = 'h-[500px] sm:h-[560px] lg:h-[calc(100vh-110px)] lg:min-h-[560px]' }) {
-  const [ok, setOk] = useState(false), [camMode, setCamMode] = useState('auto'), [fresh, setFresh] = useState(null);
+export default function BidderStage({ teams = [], curBidder = null, curBid = 0, sale = null, screen = null, call = null, lotKey = null, topbar = null, panel = null, controls = null, className = 'h-[500px] sm:h-[560px] lg:h-[calc(100vh-110px)] lg:min-h-[560px]' }) {
+  const [ok, setOk] = useState(false), [camMode, setCamMode] = useState('auto'), [fresh, setFresh] = useState(null), [onAir, setOnAir] = useState({ kind: 'wide', tid: null });
   const labelRefs = useRef({}), cheer = useRef(0), seen = useRef(sale ? sale.key : null);
   useEffect(() => { try { const c = document.createElement('canvas'); setOk(!!(c.getContext('webgl2') || c.getContext('webgl'))); } catch (e) { setOk(false); } }, []);
   useEffect(() => {   // new server-confirmed result since the page opened (history on first load is ignored; safe under React StrictMode)
@@ -519,11 +574,13 @@ export default function BidderStage({ teams = [], curBidder = null, curBid = 0, 
     const tm = setTimeout(() => setFresh(null), 4600); return () => clearTimeout(tm);
   }, [sale && sale.key]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!ok || !teams.length) return null;   // no WebGL: the normal auction screen still works
-  const MODES = [['auto', '🎥 Auto'], ['wide', 'Wide'], ['auc', 'Auctioneer'], ['screen', 'Screen']];
+  const MODES = [['auto', '🎥', 'Auto'], ['wide', '🏟', 'Wide'], ['auc', '🎙', 'Auctioneer'], ['bidder', '🙋', 'Bidder'], ['player', '📺', 'Player']];
+  const AIR = { wide: 'Wide', table: 'Bidder', celebrate: 'Sold', auc: 'Auctioneer', screen: 'Player' };
+  const bt = onAir.kind === 'table' ? teams.find((t) => t.id === onAir.tid) : null;
   return (<div className="relative select-none overflow-hidden rounded-2xl border border-white/10 bg-[#050a22]" style={{ padding: 0 }}>
     <div className={className} style={{ touchAction: 'pan-y' }}>
       <Canvas shadows dpr={[1, 1.75]} camera={{ fov: 36, position: [0, 9, 16] }} gl={{ antialias: true }}>
-        <Scene teams={teams} curBidder={curBidder} curBid={curBid} fresh={fresh} saleKey={sale ? sale.key : ''} screen={screen} labelRefs={labelRefs} camMode={camMode} cheer={cheer} />
+        <Scene teams={teams} curBidder={curBidder} curBid={curBid} fresh={fresh} saleKey={sale ? sale.key : ''} screen={screen} labelRefs={labelRefs} camMode={camMode} cheer={cheer} call={call} lotKey={lotKey} onShot={setOnAir} />
       </Canvas>
     </div>
     <div className="pointer-events-none absolute inset-0 overflow-hidden">
@@ -541,7 +598,13 @@ export default function BidderStage({ teams = [], curBidder = null, curBid = 0, 
         </div>); })}
     </div>
     {topbar && <div className="pointer-events-none absolute left-3 top-3 z-10">{topbar}</div>}
-    <div className="absolute right-3 top-3 z-20 flex gap-1">{MODES.map(([k, l]) => <button key={k} onClick={() => setCamMode(k)} className={`rounded-md px-2 py-1 text-[11px] font-bold uppercase tracking-wide backdrop-blur ${camMode === k ? 'bg-amber-400 text-black' : 'bg-black/60 text-slate-200 hover:bg-black/80'}`}>{l}</button>)}</div>
+    <div className="absolute right-3 top-3 z-20 flex items-center gap-1.5">
+      <span className="hidden items-center gap-1 rounded bg-black/65 px-1.5 py-1 text-[10px] font-bold uppercase tracking-widest text-slate-200 backdrop-blur md:inline-flex"><i className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" />On air · {AIR[onAir.kind] || 'Wide'}</span>
+      <div className="inline-flex gap-0.5 rounded-lg bg-black/65 p-0.5 backdrop-blur">{MODES.map(([k, ic, l]) => <button key={k} title={`${l} camera`} onClick={() => setCamMode(k)} className={`flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-bold uppercase tracking-wide ${camMode === k ? 'bg-amber-400 text-black' : 'text-slate-200 hover:bg-white/10'}`}><span>{ic}</span><span className="hidden lg:inline">{l}</span></button>)}</div></div>
+    {bt && <div key={bt.id + ':' + curBid} className="pop pointer-events-none absolute left-1/2 top-14 z-10 flex -translate-x-1/2 items-center gap-3 rounded-xl border-l-8 bg-[#071033]/95 px-4 py-2 shadow-2xl backdrop-blur" style={{ borderColor: bt.color }}>
+      <Logo team={bt.name} size={40} />
+      <div className="min-w-0"><div className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Bidder cam · Paddle #{pad(bt.no)}</div><div className="max-w-[220px] truncate font-display text-xl font-extrabold uppercase leading-tight">{bt.name}</div>{bt.owner ? <div className="max-w-[220px] truncate text-xs text-slate-300">{bt.owner}</div> : null}</div>
+      <div className="score text-3xl font-extrabold text-amber-400">{cr(curBid)}</div></div>}
     {panel && <div className="pointer-events-none absolute bottom-[84px] left-3 z-10 max-w-[calc(100%-1.5rem)] sm:bottom-3 sm:max-w-[58%]">{panel}</div>}
     {controls && <div className="pointer-events-none absolute bottom-3 left-1/2 z-10 -translate-x-1/2 sm:left-auto sm:right-3 sm:translate-x-0">{controls}</div>}
   </div>);
