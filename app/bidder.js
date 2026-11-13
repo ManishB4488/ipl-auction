@@ -59,7 +59,7 @@ function useTex(draw, w, h, deps) {
 const Mat = ({ c, r = 0.75, m = 0 }) => <meshStandardMaterial color={c} roughness={r} metalness={m} />;
 
 // ---------- a person (seated owner or standing auctioneer) ----------
-function Person({ pos, yaw, scale = 1, shadow = true, seated, item, skin, hair, suit, suit2, tie, index, target, no, short, color, strikeKey, lookAt }) {
+function Person({ pos, yaw, scale = 1, shadow = true, seated, item, skin, hair, suit, suit2, tie, index, target, no, short, color, strikeKey, lookAt, pov = false }) {   // pov: this is MY rep and the camera sits in his head, so hide head, torso and arms
   const root = useRef(), body = useRef(), head = useRef(), lidL = useRef(), lidR = useRef(), armR = useRef(), elbR = useRef(), handR = useRef(), held = useRef(), armL = useRef(), elbL = useRef();
   const live = useRef(); live.current = { target, strikeKey, lookAt };
   const st = useRef({ r: 0, seen: undefined, gStart: -100, look: 0, nextBlink: 1.5 + index * 0.8, blinkAt: -1 }).current;
@@ -132,14 +132,14 @@ function Person({ pos, yaw, scale = 1, shadow = true, seated, item, skin, hair, 
           <mesh position={[x, 0.45, 0]}><cylinderGeometry args={[0.085, 0.07, 0.86, 16]} /><Mat c="#22252d" /></mesh>
           <mesh position={[x, 0.04, 0.05]}><boxGeometry args={[0.13, 0.08, 0.28]} /><Mat c="#0d0d0f" r={0.4} m={0.2} /></mesh></group>)}
         <group position={[0, seated ? -SEAT_DROP : 0, 0]}>
-          <group ref={body} position={[0, 0.85, 0]}>
+          <group ref={body} position={[0, 0.85, 0]} visible={!pov}>
             <mesh position={[0, 0.3, 0]} scale={[1.35, 1, 0.78]}><capsuleGeometry args={[0.19, 0.4, 8, 20]} /><Mat c={suitC} /></mesh>
             <mesh position={[0, 0.5, 0.15]} rotation={[0.1, 0, 0]}><boxGeometry args={[0.14, 0.3, 0.02]} /><Mat c="#f2f2f2" /></mesh>
             <mesh position={[0, 0.44, 0.165]}><boxGeometry args={[0.045, 0.3, 0.015]} /><Mat c={tie} r={0.5} /></mesh>
             {item !== 'gavel' && <mesh position={[-0.12, 0.34, 0.152]}><planeGeometry args={[0.12, 0.06]} /><meshBasicMaterial map={badge} /></mesh>}
           </group>
-          <mesh position={[0, 1.6, 0]}><cylinderGeometry args={[0.06, 0.065, 0.12, 12]} /><Mat c={skin} /></mesh>
-          <group ref={head} position={[0, 1.76, 0]}>
+          <mesh position={[0, 1.6, 0]} visible={!pov}><cylinderGeometry args={[0.06, 0.065, 0.12, 12]} /><Mat c={skin} /></mesh>
+          <group ref={head} position={[0, 1.76, 0]} visible={!pov}>
             <mesh scale={[0.95, 1.12, 1]}><sphereGeometry args={[0.14, 32, 24]} /><Mat c={skin} r={0.6} /></mesh>
             <mesh rotation={[-0.45, 0, 0]} scale={[1, 1.06, 1.04]}><sphereGeometry args={[0.15, 32, 20, 0, Math.PI * 2, 0, Math.PI * 0.55]} /><Mat c={hair} r={0.9} /></mesh>
             {[-1, 1].map((d) => <group key={d}>
@@ -152,13 +152,13 @@ function Person({ pos, yaw, scale = 1, shadow = true, seated, item, skin, hair, 
             <mesh position={[0, -0.075, 0.13]}><boxGeometry args={[0.05, 0.007, 0.01]} /><Mat c="#9c4f47" /></mesh>
           </group>
           {/* free arm */}
-          <group ref={armL} position={[-sx, sy, 0]}>
+          <group ref={armL} position={[-sx, sy, 0]} visible={!pov}>
             <mesh position={[0, -upper / 2, 0]}><cylinderGeometry args={[0.052, 0.045, upper, 12]} /><Mat c={sleeveC} /></mesh>
             <group ref={elbL} position={[0, -upper, 0]}>
               <mesh position={[0, -fore / 2, 0]}><cylinderGeometry args={[0.045, 0.038, fore, 12]} /><Mat c={sleeveC} /></mesh>
               <mesh position={[0, -fore - 0.02, 0]}><sphereGeometry args={[0.04, 14, 12]} /><Mat c={skin} /></mesh></group></group>
           {/* arm that holds the paddle / gavel */}
-          <group ref={armR} position={[sx, sy, 0]}>
+          <group ref={armR} position={[sx, sy, 0]} visible={!pov}>
             <mesh position={[0, -upper / 2, 0]}><cylinderGeometry args={[0.052, 0.045, upper, 12]} /><Mat c={sleeveC} /></mesh>
             <group ref={elbR} position={[0, -upper, 0]}>
               <mesh position={[0, -fore / 2, 0]}><cylinderGeometry args={[0.045, 0.038, fore, 12]} /><Mat c={sleeveC} /></mesh>
@@ -411,10 +411,38 @@ function Hall({ screen, compact, fresh }) {
   </>);
 }
 
+
+// My Table POV: my own forearm + paddle, drawn in front of the camera. Paddle rests on the desk and is lifted into view while I lead the bid.
+function PovHand({ team, index, leading, sleeve }) {
+  const anchor = useRef(), paddle = useRef(), st = useRef({ r: 0 }).current, live = useRef(); live.current = leading;
+  const padTex = useTex((g) => {
+    g.fillStyle = '#fff'; g.beginPath(); g.arc(128, 128, 126, 0, Math.PI * 2); g.fill();
+    g.lineWidth = 16; g.strokeStyle = team.color; g.beginPath(); g.arc(128, 128, 112, 0, Math.PI * 2); g.stroke();
+    g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = '#111'; g.font = 'bold 118px Impact, "Arial Black", sans-serif'; g.fillText(pad(team.no || 0), 128, 108);
+    g.fillStyle = team.color; g.font = 'bold 46px Arial, sans-serif'; g.fillText(abbr(team.name), 128, 190);
+  }, 256, 256, [team.no, team.name, team.color]);
+  useFrame((state, dt0) => {
+    const dt = Math.min(dt0, 0.05), t = state.clock.elapsedTime;
+    st.r = damp(st.r, live.current ? 1 : 0, live.current ? 9 : 6, dt);
+    const r = smooth(st.r);
+    anchor.current.position.set(0.3 - 0.04 * r, lerp(-0.352, -0.27, r), -0.78);
+    paddle.current.rotation.set(lerp(-1.45, 0, r), 0, Math.sin(t * 9) * 0.035 * r - 0.06 * r);   // lying on the desk -> upright, with a small flutter like the other reps
+  });
+  return (<group ref={anchor} position={[0.3, -0.352, -0.78]}>
+    <mesh><sphereGeometry args={[0.045, 14, 12]} /><Mat c={SKINS[index % 5]} /></mesh>
+    <group rotation={[0, 0.32, 0]}><mesh position={[0, 0, 0.27]} rotation={[Math.PI / 2, 0, 0]}><cylinderGeometry args={[0.05, 0.043, 0.5, 14]} /><Mat c={sleeve} /></mesh></group>
+    <group ref={paddle}>
+      <mesh position={[0, 0.1, 0]}><cylinderGeometry args={[0.014, 0.014, 0.3, 8]} /><Mat c="#6b4a2b" /></mesh>
+      <mesh position={[0, 0.42, 0]}><circleGeometry args={[0.17, 40]} /><meshBasicMaterial map={padTex} toneMapped={false} side={THREE.DoubleSide} /></mesh>
+    </group>
+  </group>);
+}
+
 function Table({ team, leading }) {
   const ab = abbr(team.name);
   const front = useTex((g, w, h) => { g.fillStyle = team.color; g.fillRect(0, 0, w, h); g.fillStyle = 'rgba(0,0,0,.30)'; g.fillRect(0, h * 0.7, w, h * 0.3); g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = `bold 120px ${IMPACT}`; g.fillText(ab, w * 0.3, h * 0.42); g.font = `bold 46px Arial, sans-serif`; g.fillText(String(team.name).toUpperCase().slice(0, 26), w * 0.64, h * 0.3); g.font = `bold 34px Arial, sans-serif`; g.fillText(`PADDLE  #${pad(team.no)}`, w * 0.64, h * 0.56); g.font = '30px Arial, sans-serif'; g.fillText(team.owner || '', w / 2, h * 0.86); }, 1024, 256, [team.color, team.name, team.no, team.owner]);
   const plate = useTex((g, w, h) => { g.fillStyle = '#f4f1e8'; g.fillRect(0, 0, w, h); g.fillStyle = team.color; g.fillRect(0, 0, w, 18); g.fillStyle = '#111'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = 'bold 56px Arial, sans-serif'; g.fillText(String(team.owner || team.name).toUpperCase().slice(0, 16), w / 2, h * 0.5); g.font = '32px Arial, sans-serif'; g.fillStyle = '#555'; g.fillText(String(team.name).slice(0, 24), w / 2, h * 0.82); }, 512, 160, [team.color, team.name, team.owner]);
+  const mat = useTex((g, w, h) => { g.fillStyle = '#0d0d12'; g.fillRect(0, 0, w, h); g.fillStyle = team.color; g.fillRect(0, 0, w, 14); g.fillRect(0, h - 14, w, 14); g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = `bold 118px ${IMPACT}`; g.fillText(ab, w / 2, h * 0.5); }, 512, 300, [team.color, ab]);
   const scr = useRef();
   useFrame((_, dt) => { if (scr.current) scr.current.emissiveIntensity = damp(scr.current.emissiveIntensity, leading ? 1.8 : 0.35, 6, Math.min(dt, 0.05)); });
   return (<group position={[0, 0, TABLE_FWD]}>
@@ -424,6 +452,7 @@ function Table({ team, leading }) {
     <mesh position={[0, TABLE_Y - 0.32, 0.458]}><planeGeometry args={[2.4, 0.6]} /><meshBasicMaterial map={front} toneMapped={false} /></mesh>
     {[-1.18, 1.18].map((x) => <mesh key={x} position={[x, TABLE_Y / 2 - 0.02, 0]} castShadow><boxGeometry args={[0.06, TABLE_Y - 0.06, 0.9]} /><meshStandardMaterial color="#1a1209" roughness={0.6} /></mesh>)}
     <mesh position={[0, TABLE_Y + 0.2, -0.1]} rotation={[-0.3, Math.PI, 0]}><boxGeometry args={[0.5, 0.31, 0.025]} /><meshStandardMaterial ref={scr} color="#0a0d18" emissive={team.color} emissiveIntensity={0.35} roughness={0.3} /></mesh>
+    <mesh position={[0.42, TABLE_Y + 0.037, 0.3]} rotation={[-Math.PI / 2, 0, Math.PI]}><planeGeometry args={[0.34, 0.2]} /><meshBasicMaterial map={mat} toneMapped={false} /></mesh>
     <mesh position={[0, TABLE_Y + 0.045, -0.04]}><boxGeometry args={[0.5, 0.02, 0.34]} /><meshStandardMaterial color="#9aa0aa" metalness={0.6} roughness={0.35} /></mesh>
     <mesh position={[0.85, TABLE_Y + 0.19, 0.15]} rotation={[0, 0.3, 0]}><planeGeometry args={[0.46, 0.14]} /><meshBasicMaterial map={plate} side={THREE.DoubleSide} toneMapped={false} /></mesh>
     <mesh position={[0.85, TABLE_Y + 0.07, 0.15]} rotation={[0, 0.3, 0]}><boxGeometry args={[0.46, 0.08, 0.02]} /><meshStandardMaterial color="#d9d9d9" roughness={0.3} metalness={0.4} /></mesh>
@@ -432,15 +461,18 @@ function Table({ team, leading }) {
   </group>);
 }
 
-const SHOT_FOV = { wide: 36, table: 30, celebrate: 36, auc: 31, screen: 32 };
-const DUR = { wide: 1.8, table: 1.1, celebrate: 1.3, auc: 1.4, screen: 1.5 };   // seconds each camera move takes
+const SHOT_FOV = { wide: 36, table: 30, celebrate: 36, auc: 31, screen: 32, pov: 60 };
+const POV_EYE = 1.22;   // seated eye height (m) - desk top is 0.78
+const DUR = { wide: 1.8, table: 1.1, celebrate: 1.3, auc: 1.4, screen: 1.5, pov: 1.6 };   // seconds each camera move takes
 const PUSH = { screen: 0.15, table: 0.08, celebrate: 0.1, auc: 0.06 };         // how far each shot slowly pushes in
 const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 
-function Scene({ teams, curBidder, curBid, fresh, saleKey, screen, labelRefs, camMode, cheer, call, lotKey, onShot }) {
+function Scene({ teams, curBidder, curBid, fresh, saleKey, screen, labelRefs, camMode, cheer, call, lotKey, onShot, myTeamId }) {
   const { camera, size } = useThree();
   const n = teams.length, compact = size.width / Math.max(size.height, 1) < 1.3, slots = useMemo(() => slotsFor(n, compact ? 0.7 : 1), [n, compact]);
   const idx = teams.findIndex((t) => t.id === curBidder);
+  const myIdx = myTeamId ? teams.findIndex((t) => t.id === myTeamId) : -1;   // my franchise's seat, found from the live team list (nothing hardcoded)
+  const [povLive, setPovLive] = useState(false), povRef = useRef(false), vm = useRef();
   const light = useRef(), v = useMemo(() => new THREE.Vector3(), []), col = useMemo(() => new THREE.Color(), []);
   const wide = useRef({ pos: new THREE.Vector3(0, 9, 16), target: new THREE.Vector3(0, 1.4, -2) }).current;
   const cam = useRef({ look: new THREE.Vector3(0, 1.4, -2), init: false, id: '', t0: 0, dur: 1.2, from: { p: new THREE.Vector3(), l: new THREE.Vector3(), fov: 36 } }).current;
@@ -518,19 +550,26 @@ function Scene({ teams, curBidder, curBid, fresh, saleKey, screen, labelRefs, ca
     if (camMode === 'auto') sh = dir.cur;
     else if (camMode === 'auc') sh = { kind: 'auc' };
     else if (camMode === 'player') sh = { kind: 'screen' };
+    else if (camMode === 'pov' && myIdx >= 0) sh = { kind: 'pov', tid: myTeamId };   // locked to my own table: never overridden by bids / sales
     else if (camMode === 'bidder') { const tid = curBidder || (fresh && fresh.status === 'sold' ? fresh.fid : null); sh = tid ? { kind: 'table', tid } : { kind: 'wide' }; }   // no bidder yet: back to wide
     else sh = { kind: 'wide' };
-    const withTeam = sh.kind === 'table' || sh.kind === 'celebrate';
+    const withTeam = sh.kind === 'table' || sh.kind === 'celebrate' || sh.kind === 'pov';
     const ti = withTeam ? teamsRef.current.findIndex((t) => t.id === sh.tid) : -1, s = ti >= 0 ? slots[ti] : null;
     const kind = withTeam && !s ? 'wide' : sh.kind, id = kind + ':' + (s ? sh.tid : '');
     let fov = SHOT_FOV[kind];
-    if (kind === 'table') { const fx = Math.sin(s.yaw), fz = Math.cos(s.yaw), d = compact ? 3.1 : 3.9; T.p.set(s.x + fx * d + fz * 1.0, 2.05, s.z + fz * d - fx * 1.0); T.l.set(s.x + fx * 0.35, 1.3, s.z + fz * 0.35); }
+    if (kind === 'pov') {   // genuine first person: eyes of my seated rep. Body faces his seat direction, head turns half-way to the auctioneer (like the reps do)
+      const px = s.x + Math.sin(s.yaw) * 0.04, pz = s.z + Math.cos(s.yaw) * 0.04, aim = s.yaw + clamp(wrap(Math.atan2(AUC.x - s.x, AUC.z - s.z) - s.yaw), -1.1, 1.1) * 0.5;
+      const dh = Math.hypot(AUC.x - px, AUC.z - 2.4 - pz);   // horizontal distance to the LED screen plane
+      T.p.set(px, POV_EYE, pz);
+      T.l.set(px + Math.sin(aim) * dh + Math.sin(now * 0.5) * 0.12, 2.1 + Math.sin(now * 0.37) * 0.05, pz + Math.cos(aim) * dh);   // barely-there head sway, no shake
+      fov = clamp((2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(50)) / Math.max(size.width / Math.max(size.height, 1), 0.2)) * 180) / Math.PI, 60, 88);   // 100deg horizontal on desktop so rival tables fit
+    } else     if (kind === 'table') { const fx = Math.sin(s.yaw), fz = Math.cos(s.yaw), d = compact ? 3.1 : 3.9; T.p.set(s.x + fx * d + fz * 1.0, 2.05, s.z + fz * d - fx * 1.0); T.l.set(s.x + fx * 0.35, 1.3, s.z + fz * 0.35); }
     else if (kind === 'celebrate') { const fx = Math.sin(s.yaw), fz = Math.cos(s.yaw); T.p.set(s.x + fx * 5.2 + fz * 1.8, 2.7, s.z + fz * 5.2 - fx * 1.8); T.l.set(s.x + fx * 1.2, 1.45, s.z + fz * 1.2); }
     else if (kind === 'auc') { T.p.set(AUC.x + 1.5, STAGE_Y + 2.2, AUC.z + (compact ? 6.4 : 5.6)); T.l.set(AUC.x - 0.2, STAGE_Y + 2.0, AUC.z - 0.4); }
     else if (kind === 'screen') { T.p.set(0, 4.4, AUC.z - 2.44 + LW * 1.3); T.l.set(0, 3.95, AUC.z - 2.44); }
     else { T.p.copy(wide.pos); T.l.copy(wide.target); }
     if (id !== cam.id) {   // a cut: remember where the camera is NOW and ease from there
-      cam.from.p.copy(camera.position); cam.from.l.copy(cam.look); cam.from.fov = camera.fov; cam.t0 = now; cam.id = id; cam.dur = DUR[kind];
+      cam.from.p.copy(camera.position); cam.from.l.copy(cam.look); cam.from.fov = camera.fov; cam.t0 = now; cam.prevPov = cam.id.startsWith('pov:'); cam.id = id; cam.dur = DUR[kind];
       if (!cam.init) { cam.from.p.copy(T.p); cam.from.l.copy(T.l); cam.from.fov = fov; cam.t0 = now - 10; cam.init = true; }
       if (onShot) onShot({ kind, tid: s ? sh.tid : null });
     }
@@ -541,8 +580,12 @@ function Scene({ teams, curBidder, curBid, fresh, saleKey, screen, labelRefs, ca
     const e = ease(clamp((now - cam.t0) / cam.dur, 0, 1));
     camera.position.lerpVectors(cam.from.p, T.p, e); cam.look.lerpVectors(cam.from.l, T.l, e); camera.fov = lerp(cam.from.fov, fov, e);
     camera.updateProjectionMatrix(); camera.lookAt(cam.look); camera.updateMatrixWorld();
+    const inPov = kind === 'pov', hideMe = (inPov && e > 0.5) || (cam.prevPov && !inPov && e < 0.5);   // my own rep vanishes once the camera is inside his head, and returns once it has left
+    if (hideMe !== povRef.current) { povRef.current = hideMe; setPovLive(hideMe); }
+    if (vm.current) { vm.current.visible = inPov && e > 0.6; if (vm.current.visible) { vm.current.position.copy(camera.position); vm.current.quaternion.copy(camera.quaternion); } }
     teams.forEach((t, i) => {   // pin the HTML name tags to the 3D tables
       const el = labelRefs.current[t.id]; if (!el) return;
+      if (inPov && t.id === myTeamId) { el.style.opacity = '0'; return; }   // no floating tag over my own desk
       v.set(slots[i].tx, 1.1, slots[i].tz + 0.5).project(camera);
       const onScreen = v.z < 1 && Math.abs(v.x) < 1.2 && Math.abs(v.y) < 1.2;
       el.style.transform = `translate(${((v.x * 0.5 + 0.5) * size.width).toFixed(1)}px, ${((-v.y * 0.5 + 0.5) * size.height).toFixed(1)}px) translate(-50%, -100%)`; el.style.opacity = onScreen ? '1' : '0';
@@ -562,9 +605,10 @@ function Scene({ teams, curBidder, curBid, fresh, saleKey, screen, labelRefs, ca
     <pointLight ref={light} position={[0, 3, 0]} intensity={0} distance={6.5} decay={1.5} />
     <Hall screen={screen} compact={compact} fresh={fresh} /><Audience cheer={cheer} compact={compact} />
     {!compact && <><TVCam x={-8} z={-4.6} focus={focus} /><TVCam x={8} z={-4.6} focus={focus} /></>}
+    {myIdx >= 0 && <group ref={vm} visible={false}><PovHand team={teams[myIdx]} index={myIdx} leading={myTeamId === curBidder} sleeve={new THREE.Color(teams[myIdx].color2 || teams[myIdx].color).multiplyScalar(teams[myIdx].color2 ? 0.9 : 0.7).getStyle()} /></group>}
     {teams.map((t, i) => <group key={t.id}>
       <group position={[slots[i].x, 0, slots[i].z]} rotation={[0, slots[i].yaw, 0]}><Table team={t} leading={t.id === curBidder} /></group>
-      <Person pos={{ x: slots[i].x, z: slots[i].z }} yaw={slots[i].yaw} seated item="paddle" index={i} skin={SKINS[i % 5]} hair={HAIRS[(i * 3) % 5]} suit={new THREE.Color(t.color).multiplyScalar(0.7).getStyle()} suit2={t.color2 ? new THREE.Color(t.color2).multiplyScalar(0.9).getStyle() : undefined} tie={t.color2 || t.color} color={t.color} no={t.no} short={abbr(t.name)} target={t.id === curBidder} />
+      <Person pos={{ x: slots[i].x, z: slots[i].z }} yaw={slots[i].yaw} seated item="paddle" index={i} skin={SKINS[i % 5]} hair={HAIRS[(i * 3) % 5]} suit={new THREE.Color(t.color).multiplyScalar(0.7).getStyle()} suit2={t.color2 ? new THREE.Color(t.color2).multiplyScalar(0.9).getStyle() : undefined} tie={t.color2 || t.color} color={t.color} no={t.no} short={abbr(t.name)} target={t.id === curBidder} pov={povLive && t.id === myTeamId} />
       {(compact ? [0.85] : [-0.85, 0.85]).map((lx, k) => <Person key={k} pos={{ x: slots[i].x + lx * Math.cos(slots[i].yaw), z: slots[i].z - lx * Math.sin(slots[i].yaw) }} yaw={slots[i].yaw} seated item="idle" shadow={false} index={20 + i * 3 + k} skin={SKINS[(i + k + 2) % 5]} hair={HAIRS[(i * 2 + k + 1) % 5]} suit={new THREE.Color(t.color).multiplyScalar(0.8).getStyle()} suit2={t.color2 ? new THREE.Color(t.color2).multiplyScalar(0.9).getStyle() : undefined} tie={t.color2 || '#f2f2f2'} color={t.color} no={t.no} short={abbr(t.name)} />)}
     </group>)}
     <Person pos={{ x: AUC.x, y: STAGE_Y, z: AUC.z }} yaw={0} scale={1.25} item="gavel" index={7} skin={SKINS[2]} hair={HAIRS[2]} suit="#25262e" tie="#ffb347" color="#ffb347" strikeKey={saleKey} lookAt={idx >= 0 ? { x: slots[idx].x, z: slots[idx].z } : null} />
@@ -576,8 +620,8 @@ function Scene({ teams, curBidder, curBid, fresh, saleKey, screen, labelRefs, ca
  * sale: latest server-confirmed result {key, status, fid, player, team, price, color} - a SOLD/UNSOLD card + celebration shot is
  * shown only when this changes AFTER the page loaded.   screen: LED data (see drawLED).   topbar / panel (lower third) / controls: HTML overlays.
  */
-export default function BidderStage({ teams = [], curBidder = null, curBid = 0, sale = null, screen = null, call = null, lotKey = null, topbar = null, panel = null, controls = null, className = 'h-[500px] sm:h-[560px] lg:h-[calc(100vh-110px)] lg:min-h-[560px]' }) {
-  const [ok, setOk] = useState(false), [camMode, setCamMode] = useState('auto'), [fresh, setFresh] = useState(null), [onAir, setOnAir] = useState({ kind: 'wide', tid: null });
+export default function BidderStage({ teams = [], curBidder = null, curBid = 0, sale = null, screen = null, call = null, lotKey = null, myTeamId = null, topbar = null, panel = null, controls = null, className = 'h-[500px] sm:h-[560px] lg:h-[calc(100vh-110px)] lg:min-h-[560px]' }) {
+  const [ok, setOk] = useState(false), [camMode0, setCamMode0] = useState(() => { try { return sessionStorage.getItem('iplCamPov') === '1' ? 'pov' : 'auto'; } catch (e) { return 'auto'; } }), [fresh, setFresh] = useState(null), [onAir, setOnAir] = useState({ kind: 'wide', tid: null });
   const labelRefs = useRef({}), cheer = useRef(0), seen = useRef(sale ? sale.key : null);
   useEffect(() => { try { const c = document.createElement('canvas'); setOk(!!(c.getContext('webgl2') || c.getContext('webgl'))); } catch (e) { setOk(false); } }, []);
   useEffect(() => {   // new server-confirmed result since the page opened (history on first load is ignored; safe under React StrictMode)
@@ -585,14 +629,17 @@ export default function BidderStage({ teams = [], curBidder = null, curBid = 0, 
     seen.current = sale.key; setFresh(sale);
     const tm = setTimeout(() => setFresh(null), 4600); return () => clearTimeout(tm);
   }, [sale && sale.key]); // eslint-disable-line react-hooks/exhaustive-deps
+  const hasSeat = !!myTeamId && teams.some((t) => t.id === myTeamId);   // spectators have no table, so no POV
+  const camMode = camMode0 === 'pov' && !hasSeat ? 'auto' : camMode0;   // a remembered POV comes back as soon as my franchise is identified again (rejoin / reconnect)
+  const setCamMode = (k) => { setCamMode0(k); try { if (k === 'pov') sessionStorage.setItem('iplCamPov', '1'); else sessionStorage.removeItem('iplCamPov'); } catch (e) { /* storage blocked: fine */ } };
   if (!ok || !teams.length) return null;   // no WebGL: the normal auction screen still works
-  const MODES = [['auto', '🎥', 'Auto'], ['wide', '🏟', 'Wide'], ['auc', '🎙', 'Auctioneer'], ['bidder', '🙋', 'Bidder'], ['player', '📺', 'Player']];
-  const AIR = { wide: 'Wide', table: 'Bidder', celebrate: 'Sold', auc: 'Auctioneer', screen: 'Player' };
+  const MODES = [['auto', '🎥', 'Auto'], ['wide', '🏟', 'Wide'], ['auc', '🎙', 'Auctioneer'], ['bidder', '🙋', 'Bidder'], ['player', '📺', 'Player'], ...(hasSeat ? [['pov', '👁', 'My Table POV']] : [])];
+  const AIR = { wide: 'Wide', table: 'Bidder', celebrate: 'Sold', auc: 'Auctioneer', screen: 'Player', pov: 'My Table POV' };
   const bt = onAir.kind === 'table' ? teams.find((t) => t.id === onAir.tid) : null;
   return (<div className="relative select-none overflow-hidden rounded-2xl border border-white/10 bg-[#050a22]" style={{ padding: 0 }}>
     <div className={className} style={{ touchAction: 'pan-y' }}>
       <Canvas shadows dpr={[1, 1.75]} camera={{ fov: 36, position: [0, 9, 16] }} gl={{ antialias: true }}>
-        <Scene teams={teams} curBidder={curBidder} curBid={curBid} fresh={fresh} saleKey={sale ? sale.key : ''} screen={screen} labelRefs={labelRefs} camMode={camMode} cheer={cheer} call={call} lotKey={lotKey} onShot={setOnAir} />
+        <Scene teams={teams} curBidder={curBidder} curBid={curBid} fresh={fresh} saleKey={sale ? sale.key : ''} screen={screen} labelRefs={labelRefs} camMode={camMode} cheer={cheer} call={call} lotKey={lotKey} onShot={setOnAir} myTeamId={myTeamId} />
       </Canvas>
     </div>
     <div className="pointer-events-none absolute inset-0 overflow-hidden">
@@ -613,6 +660,9 @@ export default function BidderStage({ teams = [], curBidder = null, curBid = 0, 
     <div className="absolute right-3 top-3 z-20 flex items-center gap-1.5">
       <span className="hidden items-center gap-1 rounded bg-black/65 px-1.5 py-1 text-[10px] font-bold uppercase tracking-widest text-slate-200 backdrop-blur md:inline-flex"><i className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" />On air · {AIR[onAir.kind] || 'Wide'}</span>
       <div className="inline-flex gap-0.5 rounded-lg bg-black/65 p-0.5 backdrop-blur">{MODES.map(([k, ic, l]) => <button key={k} title={`${l} camera`} onClick={() => setCamMode(k)} className={`flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-bold uppercase tracking-wide ${camMode === k ? 'bg-amber-400 text-black' : 'text-slate-200 hover:bg-white/10'}`}><span>{ic}</span><span className="hidden lg:inline">{l}</span></button>)}</div></div>
+    {camMode === 'pov' && onAir.kind === 'pov' && (() => { const me = teams.find((t) => t.id === myTeamId), lead = teams.find((t) => t.id === curBidder); return me ? <div className="pointer-events-none absolute left-1/2 top-12 z-10 flex -translate-x-1/2 items-center gap-3 rounded-xl border-l-8 bg-[#071033]/85 px-3 py-1.5 shadow-2xl backdrop-blur" style={{ borderColor: me.color }}>
+      <div className="leading-tight"><div className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">My table · {abbr(me.name)} · Paddle #{pad(me.no)}</div><div className="text-[11px] text-slate-300">{lead ? (lead.id === me.id ? 'You lead the bid' : `${abbr(lead.name)} leads`) : 'Waiting for a bid'}</div></div>
+      <div className="score text-2xl font-extrabold text-amber-400">{cr(curBid)}</div></div> : null; })()}
     {bt && <div key={bt.id + ':' + curBid} className="pop pointer-events-none absolute left-1/2 top-14 z-10 flex -translate-x-1/2 items-center gap-3 rounded-xl border-l-8 bg-[#071033]/95 px-4 py-2 shadow-2xl backdrop-blur" style={{ borderColor: bt.color }}>
       <Logo team={bt.name} size={40} />
       <div className="min-w-0"><div className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Bidder cam · Paddle #{pad(bt.no)}</div><div className="max-w-[220px] truncate font-display text-xl font-extrabold uppercase leading-tight">{bt.name}</div>{bt.owner ? <div className="max-w-[220px] truncate text-xs text-slate-300">{bt.owner}</div> : null}</div>

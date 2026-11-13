@@ -509,7 +509,7 @@ function Live({ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act, autos,
   </div>) : null;   // same handlers as before: the server still validates every bid
   const stageCls = fs ? 'h-[calc(100vh-1rem)]' : 'h-[460px] sm:h-[520px] lg:h-[calc(100vh-110px)] lg:min-h-[560px]';
   const asideCls = fs ? 'lg:h-[calc(100vh-1rem)]' : 'lg:h-[calc(100vh-110px)] lg:min-h-[560px]';
-  const stage = <BidderStage teams={fr.map((f, i) => ({ id: f.id, name: f.team, color: f.color || '#ff8a1f', color2: f.color2, no: i + 1, owner: f.owner || '', purse: room.purse_lakh - (f.spent_lakh || 0), squad: f.squad_count || 0 }))}
+  const stage = <BidderStage myTeamId={mine?.id} teams={fr.map((f, i) => ({ id: f.id, name: f.team, color: f.color || '#ff8a1f', color2: f.color2, no: i + 1, owner: f.owner || '', purse: room.purse_lakh - (f.spent_lakh || 0), squad: f.squad_count || 0 }))}
     curBidder={hi ? hi.id : null} curBid={room.cur_bid || 0} sale={sale} screen={screen} call={call} lotKey={live && cur ? cur.id : null} topbar={topbar} panel={lower} controls={controls} className={stageCls} />;
   const ARENA_CSS = '.arena-scroll{color-scheme:dark;scrollbar-width:thin;scrollbar-color:rgba(255,138,31,.5) transparent}.arena-scroll::-webkit-scrollbar{width:6px}.arena-scroll::-webkit-scrollbar-track{background:transparent}.arena-scroll::-webkit-scrollbar-thumb{background:rgba(255,138,31,.5);border-radius:6px}';
   const hb = (label, title, onClick, cls = 'bg-white/10') => <button title={title} onClick={onClick} className={`btn px-2 py-1 text-xs ${cls}`}>{label}</button>;
