@@ -8,6 +8,39 @@ import { LeagueTab } from '../../league';
 import { MatchTab } from '../../match';
 import dynamic from 'next/dynamic';
 
+const TEAM_PALETTE = ['#fbbf24', '#3b82f6', '#ef4444', '#a855f7', '#f97316', '#22c55e', '#ec4899', '#06b6d4', '#e5e7eb', '#84cc16', '#14b8a6', '#b45309'];
+// c = main colour (jacket), c2 = second colour (sleeves + tie)
+const IPL_LOOK = [
+  [/mumbai|\bmi\b/i, { c: '#2563eb' }],                                      // MI: darker light-blue
+  [/chennai|\bcsk\b/i, { c: '#facc15' }],                                    // CSK: yellow
+  [/gujarat|\bgt\b/i, { c: '#1e3a8a' }],                                     // GT: dark blue
+  [/kolkata|\bkkr\b/i, { c: '#7e22ce' }],                                    // KKR: purple
+  [/challengers|bangalore|bengaluru|\brcb\b/i, { c: '#b91c1c' }],            // RCB: red
+  [/punjab|\bpbks\b|kings xi/i, { c: '#ef4444', c2: '#ffffff' }], // PBKS: red jacket + white sleeves
+  [/lucknow|\blsg\b/i, { c: '#4ade80', c2: '#2563eb' }],                     // LSG: green jacket + blue sleeves
+  [/delhi|capitals|\bdc\b/i, { c: '#dc2626', c2: '#2563eb' }],               // DC: red jacket + blue sleeves
+  [/rajasthan|\brr\b/i, { c: '#ec4899' }],                                   // RR: pink
+  [/hyderabad|sunrisers|\bsrh\b/i, { c: '#f97316' }],                        // SRH: orange
+];
+const hexRgb = (h) => { const s = String(h || '#000').replace('#', ''); const v = s.length === 3 ? s.split('').map((c) => c + c).join('') : s.padEnd(6, '0'); return [0, 2, 4].map((i) => parseInt(v.slice(i, i + 2), 16) || 0); };
+const colDist = (a, b) => { const x = hexRgb(a), y = hexRgb(b); return Math.hypot(x[0] - y[0], x[1] - y[1], x[2] - y[2]); };
+// IPL teams get their own look; any other team (custom names) just gets a colour that is clearly different from the rest
+function uniqueTeamColors(list) {
+  const look = {}, used = [];
+  list.forEach((f) => { const hit = IPL_LOOK.find(([re]) => re.test(String(f.team || ''))); if (hit) { look[f.id] = hit[1]; used.push(hit[1].c); } });
+  [...list].sort((a, b) => String(a.id).localeCompare(String(b.id))).forEach((f) => {
+    if (look[f.id]) return;
+    let c = f.color || '';
+    if (!c || used.some((u) => colDist(u, c) < 90)) {
+      let best = TEAM_PALETTE[0], bd = -1;
+      TEAM_PALETTE.forEach((q) => { const d = used.length ? Math.min(...used.map((u) => colDist(u, q))) : 999; if (d > bd) { bd = d; best = q; } });
+      c = best;
+    }
+    used.push(c); look[f.id] = { c };
+  });
+  return list.map((f) => ({ ...f, color: look[f.id].c, color2: look[f.id].c2 }));
+}
+
 const BidderStage = dynamic(() => import('../../bidder'), { ssr: false });   // 3D bidder (three.js) loads only in the browser
 
 const inc = (c) => (c < 100 ? 5 : c < 200 ? 10 : c < 500 ? 20 : 25);
@@ -240,7 +273,7 @@ export default function Room({ params }) {
       sb.from('room_players').select('*').eq('room_id', id).order('seq').limit(1000),
       sb.from('bids').select('*').eq('room_id', id).order('id', { ascending: false }).limit(300),
       sb.from('auto_bids').select('*').eq('room_id', id), sb.from('watchlist').select('*').eq('room_id', id), sb.from('lineups').select('*').eq('room_id', id)]);   // RLS: only your own rows
-    setRoom(r.data); setFr(f.data || []); setRps(p.data || []); setBids(b.data || []); setAutos(au.data || []); setWatch(wa.data || []); setLus(lu.error ? [] : lu.data || []);
+    setRoom(r.data); setFr(uniqueTeamColors(f.data || [])); setRps(p.data || []); setBids(b.data || []); setAutos(au.data || []); setWatch(wa.data || []); setLus(lu.error ? [] : lu.data || []);
   }, []);
 
   useEffect(() => {
@@ -476,7 +509,7 @@ function Live({ room, cur, left, P, FR, fr, rps, bids, mine, isHost, act, autos,
   </div>) : null;   // same handlers as before: the server still validates every bid
   const stageCls = fs ? 'h-[calc(100vh-1rem)]' : 'h-[460px] sm:h-[520px] lg:h-[calc(100vh-110px)] lg:min-h-[560px]';
   const asideCls = fs ? 'lg:h-[calc(100vh-1rem)]' : 'lg:h-[calc(100vh-110px)] lg:min-h-[560px]';
-  const stage = <BidderStage teams={fr.map((f, i) => ({ id: f.id, name: f.team, color: f.color || '#ff8a1f', no: i + 1, owner: f.owner || '', purse: room.purse_lakh - (f.spent_lakh || 0), squad: f.squad_count || 0 }))}
+  const stage = <BidderStage teams={fr.map((f, i) => ({ id: f.id, name: f.team, color: f.color || '#ff8a1f', color2: f.color2, no: i + 1, owner: f.owner || '', purse: room.purse_lakh - (f.spent_lakh || 0), squad: f.squad_count || 0 }))}
     curBidder={hi ? hi.id : null} curBid={room.cur_bid || 0} sale={sale} screen={screen} call={call} lotKey={live && cur ? cur.id : null} topbar={topbar} panel={lower} controls={controls} className={stageCls} />;
   const ARENA_CSS = '.arena-scroll{color-scheme:dark;scrollbar-width:thin;scrollbar-color:rgba(255,138,31,.5) transparent}.arena-scroll::-webkit-scrollbar{width:6px}.arena-scroll::-webkit-scrollbar-track{background:transparent}.arena-scroll::-webkit-scrollbar-thumb{background:rgba(255,138,31,.5);border-radius:6px}';
   const hb = (label, title, onClick, cls = 'bg-white/10') => <button title={title} onClick={onClick} className={`btn px-2 py-1 text-xs ${cls}`}>{label}</button>;

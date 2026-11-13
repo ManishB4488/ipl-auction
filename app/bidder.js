@@ -23,10 +23,21 @@ export const SHOULDER = { x: 0.3, y: 1.43, upper: 0.3, fore: 0.27 };
 const REST = { paddle: [-0.45, 0.12, -1.42], gavel: [-0.35, 0.12, -1.3] }, UP = [0.2, 2.9, -0.25];
 export const armPose = (r, item = 'paddle') => { const a = REST[item]; return { sx: lerp(a[0], UP[0], r), sz: lerp(a[1], UP[1], r), ex: lerp(a[2], UP[2], r) }; };
 export const gavelAmount = (s) => { if (s < 0 || s >= 0.95) return 0; const ph = (s % 0.475) / 0.475; return ph < 0.55 ? smooth(ph / 0.55) : 1 - smooth((ph - 0.55) / 0.45); };
-// Table positions in the hall (x = left/right, z = towards the stage (-) or the back of the room (+)). Filled in this order, so any
-// number of teams (3-10) gets a mix of left, right, middle and rear tables, never a straight line.
-const SLOTS = [[-5.6, -2.9], [5.6, -2.9], [0, 3.6], [-2.8, 0.3], [2.8, 0.3], [-6.7, 3.1], [6.7, 3.1], [-3.6, 6.0], [3.6, 6.0], [0, 8.3]];
-export const slotsFor = (n, k = 1) => SLOTS.slice(0, n).map(([x0, z]) => {   // k < 1 squeezes the room sideways for tall/narrow (phone) screens
+// Seating plans per number of teams (x = left/right, z = towards the stage (-) or the back of the room (+)). Every plan is symmetric and
+// staggered, so 3 friends sit close together like a real franchise row and 10 teams fill the hall without a straight line.
+const LAYOUTS = {
+  1: [[0, 0.5]],
+  2: [[-3.4, -1.6], [3.4, -1.6]],
+  3: [[-3.5, -2.2], [3.5, -2.2], [0, 1.7]],
+  4: [[-4.0, -2.4], [4.0, -2.4], [-2.4, 1.9], [2.4, 1.9]],
+  5: [[-4.6, -2.6], [4.6, -2.6], [0, 0.4], [-2.8, 3.8], [2.8, 3.8]],
+  6: [[-5.0, -2.8], [5.0, -2.8], [-2.6, 0.6], [2.6, 0.6], [-5.2, 4.0], [5.2, 4.0]],
+  7: [[-5.0, -2.8], [5.0, -2.8], [-2.6, 0.2], [2.6, 0.2], [-5.4, 3.2], [5.4, 3.2], [0, 6.2]],
+  8: [[-5.4, -2.9], [5.4, -2.9], [-2.7, 0.1], [2.7, 0.1], [-6.2, 3.0], [6.2, 3.0], [-3.2, 5.9], [3.2, 5.9]],
+  9: [[-5.4, -2.9], [5.4, -2.9], [-2.7, 0.1], [2.7, 0.1], [-6.2, 3.0], [6.2, 3.0], [-3.2, 5.9], [3.2, 5.9], [0, 3.0]],
+  10: [[-5.4, -2.9], [5.4, -2.9], [-2.7, 0.1], [2.7, 0.1], [-6.2, 3.0], [6.2, 3.0], [-3.2, 5.9], [3.2, 5.9], [0, 3.0], [0, 8.4]],
+};
+export const slotsFor = (n, k = 1) => LAYOUTS[Math.min(Math.max(n, 1), 10)].map(([x0, z]) => {   // k < 1 squeezes the room sideways for tall/narrow (phone) screens
   const x = x0 * k;
   const yaw = Math.atan2(-x, AUC.z - (z + 0.2)) * 0.8;   // every rep faces (roughly) the auctioneer
   return { x, z, yaw, tx: x + Math.sin(yaw) * TABLE_FWD, tz: z + Math.cos(yaw) * TABLE_FWD };
@@ -48,12 +59,13 @@ function useTex(draw, w, h, deps) {
 const Mat = ({ c, r = 0.75, m = 0 }) => <meshStandardMaterial color={c} roughness={r} metalness={m} />;
 
 // ---------- a person (seated owner or standing auctioneer) ----------
-function Person({ pos, yaw, scale = 1, shadow = true, seated, item, skin, hair, suit, tie, index, target, no, short, color, strikeKey, lookAt }) {
+function Person({ pos, yaw, scale = 1, shadow = true, seated, item, skin, hair, suit, suit2, tie, index, target, no, short, color, strikeKey, lookAt }) {
   const root = useRef(), body = useRef(), head = useRef(), lidL = useRef(), lidR = useRef(), armR = useRef(), elbR = useRef(), handR = useRef(), held = useRef(), armL = useRef(), elbL = useRef();
   const live = useRef(); live.current = { target, strikeKey, lookAt };
   const st = useRef({ r: 0, seen: undefined, gStart: -100, look: 0, nextBlink: 1.5 + index * 0.8, blinkAt: -1 }).current;
   const tmp = useMemo(() => ({ a: new THREE.Quaternion(), b: new THREE.Quaternion(), c: new THREE.Quaternion(), e: new THREE.Euler() }), []);
   const suitC = useMemo(() => new THREE.Color(suit), [suit]);
+  const sleeveC = useMemo(() => new THREE.Color(suit2 || suit), [suit, suit2]);   // second colour = sleeves
   const padTex = useTex((g) => {
     g.fillStyle = '#fff'; g.beginPath(); g.arc(128, 128, 126, 0, Math.PI * 2); g.fill();
     g.lineWidth = 16; g.strokeStyle = color; g.beginPath(); g.arc(128, 128, 112, 0, Math.PI * 2); g.stroke();
@@ -141,15 +153,15 @@ function Person({ pos, yaw, scale = 1, shadow = true, seated, item, skin, hair, 
           </group>
           {/* free arm */}
           <group ref={armL} position={[-sx, sy, 0]}>
-            <mesh position={[0, -upper / 2, 0]}><cylinderGeometry args={[0.052, 0.045, upper, 12]} /><Mat c={suitC} /></mesh>
+            <mesh position={[0, -upper / 2, 0]}><cylinderGeometry args={[0.052, 0.045, upper, 12]} /><Mat c={sleeveC} /></mesh>
             <group ref={elbL} position={[0, -upper, 0]}>
-              <mesh position={[0, -fore / 2, 0]}><cylinderGeometry args={[0.045, 0.038, fore, 12]} /><Mat c={suitC} /></mesh>
+              <mesh position={[0, -fore / 2, 0]}><cylinderGeometry args={[0.045, 0.038, fore, 12]} /><Mat c={sleeveC} /></mesh>
               <mesh position={[0, -fore - 0.02, 0]}><sphereGeometry args={[0.04, 14, 12]} /><Mat c={skin} /></mesh></group></group>
           {/* arm that holds the paddle / gavel */}
           <group ref={armR} position={[sx, sy, 0]}>
-            <mesh position={[0, -upper / 2, 0]}><cylinderGeometry args={[0.052, 0.045, upper, 12]} /><Mat c={suitC} /></mesh>
+            <mesh position={[0, -upper / 2, 0]}><cylinderGeometry args={[0.052, 0.045, upper, 12]} /><Mat c={sleeveC} /></mesh>
             <group ref={elbR} position={[0, -upper, 0]}>
-              <mesh position={[0, -fore / 2, 0]}><cylinderGeometry args={[0.045, 0.038, fore, 12]} /><Mat c={suitC} /></mesh>
+              <mesh position={[0, -fore / 2, 0]}><cylinderGeometry args={[0.045, 0.038, fore, 12]} /><Mat c={sleeveC} /></mesh>
               <group ref={handR} position={[0, -fore - 0.02, 0]}>
                 <mesh><sphereGeometry args={[0.042, 14, 12]} /><Mat c={skin} /></mesh>
                 <group ref={held}>
@@ -355,7 +367,7 @@ function Hall({ screen, compact, fresh }) {
   const floorTex = useTex((g, w, h) => { g.fillStyle = '#0a1030'; g.fillRect(0, 0, w, h); g.strokeStyle = 'rgba(122,162,255,.10)'; g.lineWidth = 2; for (let i = 0; i <= w; i += 64) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i, h); g.stroke(); g.beginPath(); g.moveTo(0, i); g.lineTo(w, i); g.stroke(); } }, 512, 512, []);
   useEffect(() => { floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping; floorTex.repeat.set(14, 14); floorTex.needsUpdate = true; }, [floorTex]);
   const wallTex = useTex((g, w, h) => { const gr = g.createLinearGradient(0, 0, 0, h); gr.addColorStop(0, '#0b1240'); gr.addColorStop(1, '#050a24'); g.fillStyle = gr; g.fillRect(0, 0, w, h); g.fillStyle = 'rgba(255,138,31,.10)'; for (let x = -h; x < w; x += 140) { g.beginPath(); g.moveTo(x, h); g.lineTo(x + 70, h); g.lineTo(x + 70 + h, 0); g.lineTo(x + h, 0); g.closePath(); g.fill(); } g.fillStyle = 'rgba(110,150,255,.12)'; for (let x = 40; x < w; x += 140) g.fillRect(x, 0, 6, h); }, 1024, 512, []);
-  const bannerTex = useTex((g, w, h) => { g.fillStyle = '#070d33'; g.fillRect(0, 0, w, h); g.fillStyle = '#ff8a1f'; g.fillRect(0, 0, w, 14); g.fillRect(0, h - 14, w, 14); g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = '#ffd36b'; g.font = `bold 120px ${IMPACT}`; g.fillText('IPL 2026', w / 2, h * 0.42); g.fillStyle = '#fff'; g.font = `bold 64px ${IMPACT}`; g.fillText('MEGA AUCTION  ·  FRIENDS EDITION', w / 2, h * 0.76); }, 1024, 256, []);
+  const bannerTex = useTex((g, w, h) => { g.fillStyle = '#070d33'; g.fillRect(0, 0, w, h); g.fillStyle = '#ff8a1f'; g.fillRect(0, 0, w, 14); g.fillRect(0, h - 14, w, 14); g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = '#ffd36b'; fitFont(g, 'IPL 2026', 110, w - 80); g.fillText('IPL 2026', w / 2, h * 0.38); g.fillStyle = '#fff'; fitFont(g, 'MEGA AUCTION  ·  FRIENDS EDITION', 56, w - 80); g.fillText('MEGA AUCTION  ·  FRIENDS EDITION', w / 2, h * 0.76); }, 1024, 256, []);
   const ceilTex = useTex((g, w, h) => { g.fillStyle = '#04071c'; g.fillRect(0, 0, w, h); g.fillStyle = '#cfe0ff'; for (let x = 32; x < w; x += 128) for (let y = 32; y < h; y += 128) g.fillRect(x, y, 64, 64); }, 512, 512, []);
   useEffect(() => { ceilTex.wrapS = ceilTex.wrapT = THREE.RepeatWrapping; ceilTex.repeat.set(5, 5); ceilTex.needsUpdate = true; }, [ceilTex]);
   const AY = STAGE_Y, SK = 1.25;   // auctioneer + podium are drawn 25% larger so the stage reads from the wide shot
@@ -371,8 +383,8 @@ function Hall({ screen, compact, fresh }) {
     <mesh position={[0, 6, -12.2]}><planeGeometry args={[46, 16]} /><meshBasicMaterial map={wallTex} toneMapped={false} /></mesh>
     {[-1, 1].map((sd) => <group key={sd}>
       <mesh position={[sd * 17, 6, 0]} rotation={[0, -sd * Math.PI / 2, 0]}><planeGeometry args={[34, 16]} /><meshBasicMaterial map={wallTex} toneMapped={false} /></mesh>
-      <mesh position={[sd * 16.9, 5.4, 1]} rotation={[0, -sd * Math.PI / 2, 0]}><planeGeometry args={[12, 3]} /><meshBasicMaterial map={bannerTex} toneMapped={false} /></mesh>
       {[-8, -3, 2, 7].map((z) => <mesh key={z} position={[sd * 16.85, 2.6, z]}><boxGeometry args={[0.1, 5, 0.18]} /><meshBasicMaterial color="#ff8a1f" /></mesh>)}</group>)}
+    {!compact && [-1, 1].map((sd) => <mesh key={'bn' + sd} position={[sd * (LW / 2 + 3.6), 4.6, AUC.z - 3.8]}><planeGeometry args={[4.4, 1.1]} /><meshBasicMaterial map={bannerTex} toneMapped={false} /></mesh>)}
     {!compact && <mesh position={[0, 11.2, -1]} rotation={[Math.PI / 2, 0, 0]}><planeGeometry args={[46, 40]} /><meshBasicMaterial map={ceilTex} toneMapped={false} /></mesh>}
     {/* stage: wide platform with steps and a glowing edge */}
     <mesh position={[0, AY / 2, AUC.z - 0.7]} castShadow receiveShadow><boxGeometry args={[14, AY, 5.4]} /><meshStandardMaterial color="#141a3d" roughness={0.35} metalness={0.3} /></mesh>
@@ -438,7 +450,7 @@ function Scene({ teams, curBidder, curBid, fresh, saleKey, screen, labelRefs, ca
   const LW = compact ? 6.4 : 11;
 
   useEffect(() => {   // wide shot: fit AND centre the stage, LED screen and every table at any card size / team count
-    const t = new THREE.Vector3(0, 1.6, -2), dir = new THREE.Vector3(2.5, 5.2, 12).normalize(), hw = compact ? 0.62 : 1;
+    const t = new THREE.Vector3(0, 1.6, -2), dir = new THREE.Vector3(1.2, n >= 7 ? 7.6 : 5.2, 12).normalize(), hw = compact ? 0.62 : 1;   // straighter than before (screen looks square-on); higher for 7+ teams so back tables are not huge
     const pts = [new THREE.Vector3(-7 * hw, 0, AUC.z), new THREE.Vector3(7 * hw, 0, AUC.z), new THREE.Vector3(-LW / 2 - 0.8, 6.8, AUC.z - 2.4), new THREE.Vector3(LW / 2 + 0.8, 6.8, AUC.z - 2.4)];
     slots.forEach((s) => { pts.push(new THREE.Vector3(s.tx - 1.3, 0, s.tz + 0.6), new THREE.Vector3(s.tx + 1.3, 0, s.tz + 0.6), new THREE.Vector3(s.x, 2.4, s.z), new THREE.Vector3(s.x - 0.6, 0, s.z + 0.9), new THREE.Vector3(s.x + 0.6, 0, s.z + 0.9)); });   // incl. the chair behind each rep so the nearest table is never cut off
     const c = camera.clone(); c.fov = SHOT_FOV.wide; c.aspect = size.width / Math.max(size.height, 1); const th = Math.tan(THREE.MathUtils.degToRad(c.fov / 2)); let d = 20;
@@ -453,7 +465,7 @@ function Scene({ teams, curBidder, curBid, fresh, saleKey, screen, labelRefs, ca
     }
     wide.pos.copy(t).addScaledVector(dir, d); wide.target.copy(t);
     if (!cam.fitted) { cam.fitted = true; cam.init = false; }
-  }, [camera, size.width, size.height, slots, compact, LW]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [camera, size.width, size.height, slots, compact, LW, n]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- BROADCAST DIRECTOR ------------------------------------------------------------------------------------------
   // Every cut in Auto is requested by a REAL room event: a server-accepted bid, a new lot, a going-once/twice/final call, or a sale the
@@ -552,8 +564,8 @@ function Scene({ teams, curBidder, curBid, fresh, saleKey, screen, labelRefs, ca
     {!compact && <><TVCam x={-8} z={-4.6} focus={focus} /><TVCam x={8} z={-4.6} focus={focus} /></>}
     {teams.map((t, i) => <group key={t.id}>
       <group position={[slots[i].x, 0, slots[i].z]} rotation={[0, slots[i].yaw, 0]}><Table team={t} leading={t.id === curBidder} /></group>
-      <Person pos={{ x: slots[i].x, z: slots[i].z }} yaw={slots[i].yaw} seated item="paddle" index={i} skin={SKINS[i % 5]} hair={HAIRS[(i * 3) % 5]} suit={new THREE.Color(t.color).multiplyScalar(0.4).getStyle()} tie={t.color} color={t.color} no={t.no} short={abbr(t.name)} target={t.id === curBidder} />
-      {(compact ? [0.85] : [-0.85, 0.85]).map((lx, k) => <Person key={k} pos={{ x: slots[i].x + lx * Math.cos(slots[i].yaw), z: slots[i].z - lx * Math.sin(slots[i].yaw) }} yaw={slots[i].yaw} seated item="idle" shadow={false} index={20 + i * 3 + k} skin={SKINS[(i + k + 2) % 5]} hair={HAIRS[(i * 2 + k + 1) % 5]} suit={new THREE.Color(t.color).multiplyScalar(0.55).getStyle()} tie="#f2f2f2" color={t.color} no={t.no} short={abbr(t.name)} />)}
+      <Person pos={{ x: slots[i].x, z: slots[i].z }} yaw={slots[i].yaw} seated item="paddle" index={i} skin={SKINS[i % 5]} hair={HAIRS[(i * 3) % 5]} suit={new THREE.Color(t.color).multiplyScalar(0.7).getStyle()} suit2={t.color2 ? new THREE.Color(t.color2).multiplyScalar(0.9).getStyle() : undefined} tie={t.color2 || t.color} color={t.color} no={t.no} short={abbr(t.name)} target={t.id === curBidder} />
+      {(compact ? [0.85] : [-0.85, 0.85]).map((lx, k) => <Person key={k} pos={{ x: slots[i].x + lx * Math.cos(slots[i].yaw), z: slots[i].z - lx * Math.sin(slots[i].yaw) }} yaw={slots[i].yaw} seated item="idle" shadow={false} index={20 + i * 3 + k} skin={SKINS[(i + k + 2) % 5]} hair={HAIRS[(i * 2 + k + 1) % 5]} suit={new THREE.Color(t.color).multiplyScalar(0.8).getStyle()} suit2={t.color2 ? new THREE.Color(t.color2).multiplyScalar(0.9).getStyle() : undefined} tie={t.color2 || '#f2f2f2'} color={t.color} no={t.no} short={abbr(t.name)} />)}
     </group>)}
     <Person pos={{ x: AUC.x, y: STAGE_Y, z: AUC.z }} yaw={0} scale={1.25} item="gavel" index={7} skin={SKINS[2]} hair={HAIRS[2]} suit="#25262e" tie="#ffb347" color="#ffb347" strikeKey={saleKey} lookAt={idx >= 0 ? { x: slots[idx].x, z: slots[idx].z } : null} />
   </>);
